@@ -10,8 +10,8 @@
 // Modifications by paulv 2024-2025
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
-// Filename: Reflow_ESP32_496c_V5_0_1
-const String FW_VERSION = "V5.0.1"; 
+//
+const String FW_VERSION = "V5.0.2"; 
 /*
   Changelog:
   Version V2.0.0:
@@ -67,6 +67,12 @@ const String FW_VERSION = "V5.0.1";
   Added degree symbol "°C" for the larger font 2
   Split out code that was used in multiple places.
   Many small enhancements and many more comments and clean-ups
+
+  Version 5.0.2:
+  Switched to Virtual Studio Code and PlatformIO, and started using Git for version control.
+  Also used the Copilot AI to help with the code for the DrawGraph() function.
+  It is now using a more natural curve instead of straight lines between the points,
+  which will make it easier to follow for the heaters.
   
 
   Todo:
@@ -88,6 +94,7 @@ const String FW_VERSION = "V5.0.1";
 #include <TFT_eSPI.h> // 2,4" SPI 240x320 - https://github.com/Ambercroft/TFT_eSPI/wiki
 #include <ezButton.h> // for the rotary button press
 #include "MAX6675.h"
+#include <math.h>  // for the round() function
 
 #define DSO_TRIG 4      // optional: to trace real-time activity on a scope
 
@@ -1982,7 +1989,7 @@ void drawAxis()
 }
 
 
-void drawCurve()
+void drawCurve_old()
 {
 	//This function draws the user-made reflow curve.
 	//Since the axes are slightly shifted from the edge of the display, there is a 3px shift for the start of the preheat curve
@@ -1996,6 +2003,7 @@ void drawCurve()
 
   // Draw the curve
   // starting center of x-y lines
+
   tft.drawLine(18, 240 - 4-10, preheatTime_px, preheatTemp_px, YELLOW);
 	tft.drawLine(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
 	tft.drawLine(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
@@ -2004,6 +2012,45 @@ void drawCurve()
   
 }
 
+// =================================================================================================
+
+// Function to interpolate between two points using cosine interpolation
+float cosineInterpolate(float y1, float y2, float mu) {
+  float mu2 = (1 - cos(mu * PI)) / 2;
+  return (y1 * (1 - mu2) + y2 * mu2);
+}
+
+void drawSmoothCurve(int x0, int y0, int x1, int y1, uint16_t color) {
+  int steps = 100; // Number of interpolation steps
+  for (int i = 0; i < steps; i++) {
+      float mu = (float)i / (float)(steps - 1);
+      int x = x0 + (x1 - x0) * mu;
+      int y = cosineInterpolate(y0, y1, mu);
+      tft.drawPixel(x, y, color);
+  }
+}
+
+void drawCurve() {
+  // This function draws the user-made reflow curve.
+  // Since the axes are slightly shifted from the edge of the display, there is a 3px shift for the start of the preheat curve
+  // I indicated different sections of the reflow curve by different colors.
+  // The cooling time +20 is just an arbitrary value, just to illustrate the cooling part (decreasing temperature) on the reflow curve.
+  // It has no physical meaning other than it illustrates the cooling.
+
+  tft.setTextSize(1); // Reset the size to 1 in case the code is coming from someplace else
+
+  drawAxis();
+
+  // Draw the curve using smooth interpolation
+  drawSmoothCurve(18, 240 - 14, preheatTime_px, preheatTemp_px, YELLOW);
+  drawSmoothCurve(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
+  drawSmoothCurve(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
+  drawSmoothCurve(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
+  drawSmoothCurve(coolingTime_px, coolingTemp_px, coolingTime_px + 40, coolingTemp_px + 20, BLUE);
+}
+
+
+//=================================================================================================
 
 void printTargetTemperature() //Momentary target temperature which is derived from the elapsed time
 {
