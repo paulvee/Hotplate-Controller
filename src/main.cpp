@@ -73,6 +73,9 @@ const String FW_VERSION = "V5.0.2";
   Also used the Copilot AI to help with the code for the DrawGraph() function.
   It is now using a more natural curve instead of straight lines between the points,
   which will make it easier to follow for the heaters.
+  Added a run-time selection of solder pastes.
+  Moved the preheat temp and time fields a bit out of the way of the curve.
+  Removed the free heating and free cooling fields from the display when we reflow.
   
 
   Todo:
@@ -83,8 +86,7 @@ const String FW_VERSION = "V5.0.2";
   the schematic or the code (two SSR's?, more K-type temp sensors?)
 
   Nice to have:
-  Add a way to scroll through the paste name so you can select a few common solder paste profiles. (haven't figured that out yet)
-  Maybe add a way to store the updated/edited temp/time values in EEPROM and load them at boot.
+  Maybe add a way to store an updated/edited profile in EEPROM and load that at boot.
   Add a beeper to signal end-of-reflow
 
 */
@@ -219,42 +221,79 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
 String pasteName = "Sn42/Bi57.6/Ag0.4";
 
+// these vars will hold the various paste reflow curve values
 // From room temperature to soaking temperature
-volatile int preheatTemp = 90;
-volatile int preheatTime = 90; //Note: times are always as compared to zero and not the length of the process.
+volatile int preheatTemp = 0;
+volatile int preheatTime = 0; //Note: times are always as compared to zero and not the length of the process.
 
 // Soaking temperature (nearly flat curve)
-volatile int soakingTemp = 130;
-volatile int soakingTime = 180;
+volatile int soakingTemp = 0;
+volatile int soakingTime = 0;
 
 // Soaking temperature to peak temperature (slight overshoot to peak temperature)
-volatile int reflowTemp = 165;
-volatile int reflowTime = 240;
+volatile int reflowTemp = 0;
+volatile int reflowTime = 0;
 
 // Cooling temperature - Same temperature as the peak, because this part is more like keeping the solder around Tmelt for a short (~10s) time
-volatile int coolingTemp = 165;
-volatile int coolingTime = 260;
+volatile int coolingTemp = 0;
+volatile int coolingTime = 0;
 
-// ==================================================================
-// Reflow Curve parts for Chipquick Sn63/Pb37 - 183C : I have this paste in a can
-// const String pasteName = "Sn63/Pb37";
 
-// // From room temperature to soaking temperature
-// volatile int preheatTemp = 100;
-// volatile int preheatTime = 30;
+// struct to group the used values for each solderpaste variation
+struct solderpaste {
+  char pasteName[30];
+  volatile int preheatTemp; // Temps in degrees C. Preheat is from room temperature to soaking temperature
+  volatile int preheatTime; // Note: times in seconds are always as compared to zero and not the length of the process step.
+  volatile int soakingTemp; // Soaking temperature (nearly flat curve)
+  volatile int soakingTime;
+  volatile int reflowTemp; // Soaking temperature to peak temperature (slight overshoot to peak temperature)
+  volatile int reflowTime;
+  volatile int coolingTemp; // Cooling temperature - Same temperature as the peak, because this part is more like keeping the solder around Tmelt for a short (~10s) time
+  volatile int coolingTime;  
+};
 
-// // Soaking temperature 
-// volatile int soakingTemp = 150;
-// volatile int soakingTime = 120;
+// Create an array of struct's for the various solder pastes. 
+// The separator is the number of fields in the struct (9), so the array is created correctly.
+// it can hold any number of solderpastes, the code handles that.
+solderpaste solderpastes[] = {
+  // Paste 0
+  "Sn42/Bi57.6/Ag0.4", // Solderpaste
+  90,   // preheatTemp
+  90,   // preheatTime Note: times are always as compared to zero and not the length of the process.
+  130,  // soakingTemp
+  180,  // soakingTime
+  165,  // reflowTemp
+  240,  // reflowTime
+  165,  // coolingTemp 
+  260,  // coolingTime
+  
+  // Paste 1
+  "Sn63/Pb37",
+  100,
+  30,
+  150,
+  120,
+  235,
+  210,
+  235,
+  220,
 
-// // Soaking temperature to peak temperature (slight overshoot to peak temperature)
-// volatile int reflowTemp = 235;
-// volatile int reflowTime = 210;
+  // Paste 2
+  "Sn63/Pb37 Mod",
+  100,
+  60, // changes this from unrealistic 30s to 60s
+  150,
+  120,
+  235,
+  210,
+  235,
+  220   
+};
 
-// // Cooling temperature - Same temperature as the peak, because this part is more like keeping the solder around Tmelt for a short (~10s) time
-// volatile int coolingTemp = 235;
-// volatile int coolingTime = 220;
-// ===================================================================
+int solderPasteSelected = 0; // hold the index to the array of solderpastes
+int prev_solderPasteSelected = 0; // previous selected solder paste index to avoid screen redraws
+int numSolderpastes = 0; // the number of solderpastes in the array, will be set dynamically based on the size of the array
+
 
 // Remember the original value during the editing mode. Used to eliminate
 // a screen redraw when nothing is changed.
@@ -270,8 +309,8 @@ volatile int totalTime = coolingTime; // used in the new plotReflowProfile() fun
 
 
 // display the paste name on the TFT screen
-const int pasteNamePosX = 60;
-const int pasteNamePosY = 0; // position from the top. It will not be erased during the reflow, so stays there.
+const int pasteNamePosX = 50; // position from the left
+const int pasteNamePosY = 1; // position from the top of the TFT. 
 
 double targetTemp = 0; //A variable that holds one of the above 4 target values temporarily, based on the actual part of the active heating phase
 volatile int freeHeatingTemp = 200; // Free heating target temperature
@@ -308,6 +347,7 @@ bool menuChanged = false; //it tells if the a new menu item should be drawn
 bool menuSelected = false; //it tells if the user entered a menu (selected an item)
 bool editMode = false; // Used to avoid the updateHighlighting when in the edit mode
 //Selection of the fields by the rotation of the encoder
+bool solderpasteFieldSelected = false;
 bool preheatTempSelected = false;
 bool preheatTimeSelected = false;
 bool soakingTempSelected = false;
@@ -321,6 +361,7 @@ bool freeHeatingTargetSelected = false;
 bool freeHeatingOnOffSelected = false;
 bool freeCoolingTargetSelected = false;
 bool freeCoolingOnOffSelected = false;
+
 
 //--------------------------------------
 bool redrawCurve = true; //tells the code if the reflow curve has to be redrawn
@@ -387,6 +428,36 @@ void setup()
   thermoCouple.begin();
   thermoCouple.setSPIspeed(40000000);
 
+  //----- set the initial solderpaste values
+  numSolderpastes = sizeof(solderpastes) / sizeof(solderpaste); // the size of the array of solderpastes
+  
+  solderpaste current = solderpastes[solderPasteSelected]; // select the first one as the default 
+  // use the struct on the selected array to access the elements
+  // and transpose the values
+  pasteName = current.pasteName;
+  preheatTemp = current.preheatTemp;
+  preheatTime = current.preheatTime;
+  soakingTemp = current.soakingTemp;
+  soakingTime = current.soakingTime;
+  reflowTemp = current.reflowTemp;
+  reflowTime = current.reflowTime;
+  coolingTemp = current.coolingTemp;
+  coolingTime = current.coolingTime;
+  totalTime = coolingTime;
+  // for testing: print the values
+  /*
+  Serial.println(pasteName);
+  Serial.println(preheatTemp);
+  Serial.println(preheatTime);
+  Serial.println(soakingTemp);
+  Serial.println(soakingTime);
+  Serial.println(reflowTemp);
+  Serial.println(reflowTime);
+  Serial.println(coolingTemp);
+  Serial.println(coolingTime);
+  Serial.println(totalTime);
+  */
+  
   //-----
   Serial.println("welcome screen on tft");
 
@@ -685,9 +756,26 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
   else if (freeCoolingOnOffSelected == true)
   {
     // freeCoolingOnOffSelected does not do anything with the rotation of the encoder
-  }
-  else//This navigates through the fields in the menu
-  {
+  } else if (solderpasteFieldSelected == true) { // Add the new field logic here
+    if (CLKNow != CLKPrevious && CLKNow == 1) {
+      if (digitalRead(RotaryDT) != CLKNow) {
+        if (solderPasteSelected > 0) {
+          solderPasteSelected = solderPasteSelected - 1;
+        } else {
+          solderPasteSelected = numSolderpastes - 1; // Wrap around to the last index
+        }
+      } else {
+        if (solderPasteSelected < numSolderpastes - 1) {
+          solderPasteSelected = solderPasteSelected + 1;
+        } else {
+          solderPasteSelected = 0; // Wrap around to the first index
+        }
+      }
+    }
+    menuChanged = true;
+    CLKPrevious = CLKNow; // Store last CLK state
+  } else { //This navigates through the fields in the menu
+
     if (CLKNow != CLKPrevious && CLKNow == 1)
     {
       previousItemCounter = itemCounter;
@@ -699,12 +787,12 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
         }
         else
         {
-          itemCounter = 12; //after the first menu item, we go back to the last menu item
+          itemCounter = 13; //after the first menu item, we go back to the last menu item
         }
       }
       else
       {
-        if (itemCounter < 12)
+        if (itemCounter < 13)
         {
           itemCounter = itemCounter +1;
         }
@@ -786,11 +874,13 @@ void drawReflowCurve()
 
 		//Draw the values of the portions of the curve
 		//Preheat
-		tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
+		//tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
+    tft.setCursor(preheatTime_px - 10, preheatTemp_px - 30);
 		tft.setTextColor(RED);
 		tft.print(preheatTemp);
     tft.print("C");
-		tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+		//tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+    tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
 		tft.setTextColor(WHITE);
 		tft.print(preheatTime);
     tft.print("s");
@@ -904,15 +994,21 @@ void measureTemperature()
 */
 void removeFieldsFromDisplay()
 {
-  //Remove all the numbers, keep only the curve -> It makes the display cleaner, easier to read
-  tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 20, 24, 9, RectRadius, BLACK);
-  tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 10, 24, 9, RectRadius, BLACK);
+  // When we select Reflow
+  // Remove all the numbers, keep only the curve -> It makes the display cleaner, easier to read
+  tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 30, 24, 9, RectRadius, BLACK);
+  tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 20, 24, 9, RectRadius, BLACK);
   tft.fillRoundRect(soakingTime_px - 25, soakingTemp_px - 20, 24, 9, RectRadius, BLACK);
   tft.fillRoundRect(soakingTime_px - 25, soakingTemp_px - 10, 24, 9,  RectRadius,BLACK);
   tft.fillRoundRect(reflowTime_px - 5, reflowTemp_px + 10, 24, 9, RectRadius, BLACK);
   tft.fillRoundRect(reflowTime_px - 5, reflowTemp_px + 20, 24, 9, RectRadius, BLACK);
-  tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, BLACK);
-  tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
+  tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 26, 24, 9, RectRadius, BLACK);
+  tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
+
+  // Also remove the free cooling and free heating buttons and values
+  tft.fillRoundRect(220, 20, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
+  tft.fillRoundRect(220, 40, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
+
 }
 
 
@@ -953,11 +1049,11 @@ void processRotaryButton()
     {
       //Edit mode: Green background, red number
       editMode = true;
-      tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, GREEN); //highlight
+      tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 20, 9, RectRadius, GREEN); //highlight
       //tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
       tft.setTextColor(RED);
       //tft.print(preheatTemp);     
-      tft.drawString(String(preheatTemp),preheatTime_px - 25, preheatTemp_px - 20, 1);
+      tft.drawString(String(preheatTemp),preheatTime_px - 10, preheatTemp_px - 30, 1);
 
     }
     else
@@ -969,8 +1065,8 @@ void processRotaryButton()
         prev_preheatTemp = preheatTemp;
       }
       //Ending edit mode
-      tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, YELLOW); //highlight
-      tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
+      tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 24, 9, RectRadius, YELLOW); //highlight
+      tft.setCursor(preheatTime_px - 10, preheatTemp_px - 30);
       tft.setTextColor(RED);
       tft.print(preheatTemp);
       tft.print("C");
@@ -986,8 +1082,8 @@ void processRotaryButton()
     {
       editMode = true;
       //Green background
-      tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 11, 24, 9, RectRadius, GREEN); //highlight
-      tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+      tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 21, 24, 9, RectRadius, GREEN); //highlight
+      tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
       tft.setTextColor(RED);
       tft.print(preheatTime);
     }
@@ -1000,8 +1096,8 @@ void processRotaryButton()
         prev_preheatTime = preheatTime;
       }
       //Ending edit mode
-      tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 11, 24, 9, RectRadius, YELLOW); //highlight
-      tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+      tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 21, 24, 9, RectRadius, YELLOW); //highlight
+      tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
       tft.setTextColor(RED);
       tft.print(preheatTime);
       tft.print("s");
@@ -1201,6 +1297,8 @@ void processRotaryButton()
     if (startStopButtonSelected == true)
     {
       editMode = true;
+      Serial.print("processRotaryButton: "); Serial.println(editMode);
+
       //Remove all the numbers, keep only the curve -> It makes the display cleaner, easier to read
       removeFieldsFromDisplay();
       drawCurve(); // redraw the curve
@@ -1218,6 +1316,7 @@ void processRotaryButton()
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }else{
       // Update the Reflow button
+      Serial.print("RotaryButton not selected: "); Serial.println(editMode);
       //drawActionButtons();
       tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
@@ -1232,6 +1331,10 @@ void processRotaryButton()
       //If user presses stop before the program is finished, we assume also that the fan is not needed
       // ending edit mode
       editMode = false;
+
+      // Reapply the highlight to the selected field
+      menuChanged = true; // Ensure menuChanged is set to true
+      updateHighlighting();
     }
     break;
 
@@ -1281,7 +1384,11 @@ void processRotaryButton()
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
-    }
+
+      // Reapply the highlight to the selected field
+      menuChanged = true; // Ensure menuChanged is set to true
+      updateHighlighting();
+}
     break;
 
   case 11: //--Free cooling temperature
@@ -1331,6 +1438,48 @@ void processRotaryButton()
       heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
 
+      // Reapply the highlight to the selected field
+      menuChanged = true; // Ensure menuChanged is set to true
+      updateHighlighting();
+
+    }
+    break;
+
+  case 13: // change the solder paste
+    solderpasteFieldSelected = !solderpasteFieldSelected;
+    if (solderpasteFieldSelected == true) {
+      editMode = true;
+      // highlighting the edit mode
+      tft.fillRoundRect(48, 0, 150, 18, RectRadius, GREEN); //X,Y, W,H, Color
+      tft.setTextColor(RED);
+      // Fetch the paste name from the array using solderPasteSelected
+      pasteName = solderpastes[solderPasteSelected].pasteName;
+      tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
+     } else {
+      if (prev_solderPasteSelected != solderPasteSelected) // only redraw when there is a change
+        {
+          redrawCurve = true;
+          // Fetch the values from the array using solderPasteSelected
+          // and transpose the values to make them active
+          preheatTemp = solderpastes[solderPasteSelected].preheatTemp;
+          preheatTime = solderpastes[solderPasteSelected].preheatTime;
+          soakingTemp = solderpastes[solderPasteSelected].soakingTemp;
+          soakingTime = solderpastes[solderPasteSelected].soakingTime;
+          reflowTemp = solderpastes[solderPasteSelected].reflowTemp;
+          reflowTime = solderpastes[solderPasteSelected].reflowTime;
+          coolingTemp = solderpastes[solderPasteSelected].coolingTemp;
+          coolingTime = solderpastes[solderPasteSelected].coolingTime;
+          totalTime = coolingTime;
+
+          drawReflowCurve();
+          prev_solderPasteSelected = solderPasteSelected;
+        }
+      // ending edit mode
+      tft.fillRoundRect(48, 0, 150, 18, RectRadius, YELLOW); //X,Y, W,H, Color
+      tft.setTextColor(RED);
+      pasteName = solderpastes[solderPasteSelected].pasteName;
+      tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
+      editMode = false;
     }
     break;
   }
@@ -1352,44 +1501,27 @@ void updateHighlighting()
 		switch (itemCounter) //check which menu was changed
 		{
     case 0: // Preheat temp
-      if (previousItemCounter == 12) //if we come from the last item
+      if (editMode)
       {
-        if (editMode)
-        {
-          tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, GREEN); //highlight the first item
-        }else{
-          previousItemCounter = -1; //Avoid "stale highlighting"
-          redrawCurve = true; //Allow redrawing the main curve
-          drawReflowCurve(); //Redraw the main curve
-          tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, YELLOW); //highlight the first item
-        }
-        tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20); //set the cursor to the corresponding spot
-        tft.setTextColor(RED); //set text color
-        tft.print(preheatTemp); //print the value
+        tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 24, 9, RectRadius, GREEN); //highlight edit mode
+      }else{
+        tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 24, 9, RectRadius, YELLOW); //highlight
       }
-      else //We start from the beginning
-      {
-        if (editMode)
-        {
-          tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, GREEN); //highlight edit mode
-        }else{
-          tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, YELLOW); //highlight
-        }
-        tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20); //set the cursor to the corresponding spot
-        tft.setTextColor(RED); //set text color
-        tft.print(preheatTemp); //print the value
-      }
+      tft.setCursor(preheatTime_px - 10, preheatTemp_px - 30); //set the cursor to the corresponding spot
+      tft.setTextColor(RED); //set text color
+      tft.print(preheatTemp); //print the value
+    
       //Note: All the following lines are doing the same, they just print to different coordinates and different values.
       break;
 
 		case 1: // Preheat time
       if (editMode)
       {
-        tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 11, 24, 9, RectRadius, GREEN); //highlight edit mode
+        tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 21, 24, 9, RectRadius, GREEN); //highlight edit mode
       }else{
-        tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 11, 24, 9, RectRadius, YELLOW); //highlight
+        tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 21, 24, 9, RectRadius, YELLOW); //highlight
       }			
-			tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+			tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
 			tft.setTextColor(RED);
 			tft.print(preheatTime);
 			break;
@@ -1467,6 +1599,7 @@ void updateHighlighting()
 			break;
 
 		case 8: // Reflow start/stop
+      Serial.print("Update highlighting Edit mode: ");Serial.println(editMode);
       if (editMode)
       {
         tft.fillRoundRect(260, 0, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1523,6 +1656,17 @@ void updateHighlighting()
       //previousItemCounter = -1; //clear highlight status
       break;
 
+    case 13: // solderpast field
+      if (editMode) {
+        tft.fillRoundRect(48, 0, 150, 18, RectRadius, GREEN); //X,Y, W,H, Color
+      }else{
+        tft.fillRoundRect(48, 0, 150, 18, RectRadius, YELLOW); //X,Y, W,H, Color
+      }
+      tft.setTextColor(RED);
+      pasteName = solderpastes[solderPasteSelected].pasteName;
+      tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
+      break;
+
 		}
 		//--------------------------------------------------------------------------------------------
 		//Remove the previous highlighting
@@ -1530,15 +1674,15 @@ void updateHighlighting()
 		switch (previousItemCounter) //check which item was previously highlighted so we can restore its original look (no highlighting)
 		{
 		case 0: // preheat temp
-			tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 21, 24, 9, RectRadius, BLACK); //restore original background (black)
-			tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20); //set the cursor to the corresponding place (inside the rectangle)
+			tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 24, 9, RectRadius, BLACK); //restore original background (black)
+			tft.setCursor(preheatTime_px - 10, preheatTemp_px - 30); //set the cursor to the corresponding place (inside the rectangle)
 			tft.setTextColor(RED); //set text color
 			tft.print(preheatTemp); //print value	
       tft.print("C");
 			break;
 		case 1: // preheat time
-			tft.fillRoundRect(preheatTime_px - 25, preheatTemp_px - 11, 24, 9, RectRadius, BLACK);
-			tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
+			tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 21, 24, 9, RectRadius, BLACK);
+			tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
 			tft.setTextColor(WHITE);
 			tft.print(preheatTime);
       tft.print("s");
@@ -1586,6 +1730,7 @@ void updateHighlighting()
       tft.print("s");
 			break;
 		case 8: // Reflow start/stop
+      Serial.println("update_highlighting");
       tft.fillRoundRect(260, 0, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 0, 2);
@@ -1609,6 +1754,12 @@ void updateHighlighting()
       tft.fillRoundRect(260, 40, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("COOLING", 265, 39, 2);
+      break;    
+    case 13: // solderpaste field
+      tft.fillRoundRect(46, 0, 152, 20, RectRadius, BLACK); //erase the previous
+      tft.setTextColor(WHITE);
+      pasteName = solderpastes[solderPasteSelected].pasteName;
+      tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
       break;
 		}
 		menuChanged = false;
