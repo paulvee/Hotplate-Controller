@@ -80,7 +80,7 @@ const String FW_VERSION = "V5.0.2";
 
   Todo:
   Stopping a Reflow, Freeheat or Freecooling does not highlight the field back in "editMode" again,
-  so you can't see what the selected field is.
+  so you can't see what the selected field is. Even Copilot could not help me with that.
 
   Test hardware heat-up times with additional heaters and see if we need to change 
   the schematic or the code (two SSR's?, more K-type temp sensors?)
@@ -394,7 +394,7 @@ void setup()
 	Serial.begin(9600);
   while (!Serial);
   delay(5000);
-	Serial.print("\n\r\n\rCurious Scientist - Reflow controller ");
+	Serial.print("\n\r\n\rReflow controller ");
   Serial.println(FW_VERSION);
 
   //Serial.print("tempPixelFactor = ");Serial.println(tempPixelFactor,3);
@@ -444,19 +444,6 @@ void setup()
   coolingTemp = current.coolingTemp;
   coolingTime = current.coolingTime;
   totalTime = coolingTime;
-  // for testing: print the values
-  /*
-  Serial.println(pasteName);
-  Serial.println(preheatTemp);
-  Serial.println(preheatTime);
-  Serial.println(soakingTemp);
-  Serial.println(soakingTime);
-  Serial.println(reflowTemp);
-  Serial.println(reflowTime);
-  Serial.println(coolingTemp);
-  Serial.println(coolingTime);
-  Serial.println(totalTime);
-  */
   
   //-----
   Serial.println("welcome screen on tft");
@@ -493,7 +480,7 @@ void loop()
   if (button.isPressed()) processRotaryButton();
   measureTemperature();
 	updateHighlighting();
-	drawReflowCurve();
+	//drawReflowCurve(); //This is now done in the various functions
 	heating();
 	freeHeating();
 	freeCooling();
@@ -1297,8 +1284,6 @@ void processRotaryButton()
     if (startStopButtonSelected == true)
     {
       editMode = true;
-      Serial.print("processRotaryButton: "); Serial.println(editMode);
-
       //Remove all the numbers, keep only the curve -> It makes the display cleaner, easier to read
       removeFieldsFromDisplay();
       drawCurve(); // redraw the curve
@@ -1308,16 +1293,14 @@ void processRotaryButton()
       tft.setTextColor(RED);
       tft.drawString("STOP", 265, 0, 2);
 
-      //---------------------------
-
       currentPhase = PREHEAT; //Set the current phase to preheat (in case we do a second reflow round)
       reflow = true; //Enable reflow
       heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }else{
-      // Update the Reflow button
-      Serial.print("RotaryButton not selected: "); Serial.println(editMode);
-      //drawActionButtons();
+      // First, update all the buttons (easy way out)
+      drawActionButtons();
+      // update the reflow field so it's still marked as selected so we know where we are
       tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 0, 2);
@@ -1331,6 +1314,7 @@ void processRotaryButton()
       //If user presses stop before the program is finished, we assume also that the fan is not needed
       // ending edit mode
       editMode = false;
+      drawReflowCurve(); // redraw the curve with the values
 
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
@@ -1371,9 +1355,11 @@ void processRotaryButton()
       heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }else{
-      //drawActionButtons();
-      tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
-      tft.setTextColor(WHITE);
+      // First draw all the buttons (easy way out)
+      drawActionButtons();
+      // update the heating field so it's still marked as selected so we know where we are
+      tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); // still highlighted
+		  tft.setTextColor(WHITE);
       tft.drawString("HEATING", 265, 20, 2);
       enableFreeHeating = false;
       freeHeatingOnOffSelected = false;
@@ -1384,7 +1370,7 @@ void processRotaryButton()
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
-
+      drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
       updateHighlighting();
@@ -1425,7 +1411,9 @@ void processRotaryButton()
       elapsedHeatingTime = 0; //set the elapsed time to 0
       digitalWrite(SSR_pin, LOW); // just in case it's still on when we select freecooling after freeheating
     }else{
-      //drawActionButtons();
+      // First draw all the buttons (easy way out)
+      drawActionButtons();
+      // Then update the cooling field so it's still marked as selected so we know where we are
       tft.fillRoundRect(260, 40, 60, 15, RectRadius, YELLOW);
       tft.setTextColor(WHITE);
       tft.drawString("COOLING", 265, 39, 2);
@@ -1437,7 +1425,7 @@ void processRotaryButton()
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
-
+      drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
       updateHighlighting();
@@ -1599,7 +1587,6 @@ void updateHighlighting()
 			break;
 
 		case 8: // Reflow start/stop
-      Serial.print("Update highlighting Edit mode: ");Serial.println(editMode);
       if (editMode)
       {
         tft.fillRoundRect(260, 0, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1730,7 +1717,6 @@ void updateHighlighting()
       tft.print("s");
 			break;
 		case 8: // Reflow start/stop
-      Serial.println("update_highlighting");
       tft.fillRoundRect(260, 0, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 0, 2);
