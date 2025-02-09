@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.0.2"; 
+const String FW_VERSION = "V5.0.3"; 
 /*
   Changelog:
   Version V2.0.0:
@@ -77,11 +77,11 @@ const String FW_VERSION = "V5.0.2";
   Moved the preheat temp and time fields a bit out of the way of the curve.
   Removed the free heating and free cooling fields from the display when we reflow.
   
+  Version 5.0.3
+  Fixed the highlighting issue with the buttons. When the action was stopped, the field was not highlighted.
 
   Todo:
-  Stopping a Reflow, Freeheat or Freecooling does not highlight the field back in "editMode" again,
-  so you can't see what the selected field is. Even Copilot could not help me with that.
-
+  
   Test hardware heat-up times with additional heaters and see if we need to change 
   the schematic or the code (two SSR's?, more K-type temp sensors?)
 
