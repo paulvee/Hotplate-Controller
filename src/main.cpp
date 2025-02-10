@@ -356,6 +356,7 @@ bool reflowTempSelected = false;
 bool reflowTimeSelected = false;
 bool coolingTempSelected = false;
 bool coolingTimeSelected = false;
+bool freeWarmupTempSelected = false;
 bool startStopButtonSelected = false;
 bool freeHeatingTargetSelected = false;
 bool freeHeatingOnOffSelected = false;
@@ -688,6 +689,31 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
     menuChanged = true;
     CLKPrevious = CLKNow;  // Store last CLK state
   }
+  else if (freeWarmupTempSelected == true)
+  {
+    if (CLKNow != CLKPrevious && CLKNow == 1)
+    {
+      if (digitalRead(RotaryDT) != CLKNow)
+      {
+        if (freeWarmUpTemp > 20) // lowest at 20°C
+        {
+          freeWarmUpTemp = freeWarmUpTemp -1;
+        }
+        {
+          freeWarmUpTemp = freeWarmUpTemp -1;
+        }
+      }
+      else
+      {
+        if (freeWarmUpTemp < 60) // Up to 60°C
+        {
+          freeWarmUpTemp = freeWarmUpTemp +1;
+        }
+      }
+    }
+    menuChanged = true;
+    CLKPrevious = CLKNow;  // Store last CLK state
+  }
   else if (freeHeatingTargetSelected == true)
   {
     if (CLKNow != CLKPrevious && CLKNow == 1)
@@ -915,7 +941,7 @@ void drawActionButtons(){
     tft.drawString("WARMUP", 265, 0, 2);
 
     // Free warmup value
-    tft.fillRoundRect(220, 0, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+    tft.fillRoundRect(220, 2, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
     tft.setTextColor(RED);
     tft.drawString(String(freeWarmUpTemp)+"C", 228, 4, 1);
 
