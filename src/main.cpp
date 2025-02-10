@@ -356,7 +356,8 @@ bool reflowTempSelected = false;
 bool reflowTimeSelected = false;
 bool coolingTempSelected = false;
 bool coolingTimeSelected = false;
-bool freeWarmupTempSelected = false;
+bool freeWarmUpTempSelected = false;
+bool freeWarmUpButtonSelected = false;
 bool startStopButtonSelected = false;
 bool freeHeatingTargetSelected = false;
 bool freeHeatingOnOffSelected = false;
@@ -689,7 +690,7 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
     menuChanged = true;
     CLKPrevious = CLKNow;  // Store last CLK state
   }
-  else if (freeWarmupTempSelected == true)
+  else if (freeWarmUpTempSelected == true)
   {
     if (CLKNow != CLKPrevious && CLKNow == 1)
     {
@@ -714,6 +715,10 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
     menuChanged = true;
     CLKPrevious = CLKNow;  // Store last CLK state
   }
+  else if (freeWarmUpButtonSelected == true)
+  {
+    // freeWarmUpButtonSelected does not do anything with the rotation of the encoder
+  } 
   else if (freeHeatingTargetSelected == true)
   {
     if (CLKNow != CLKPrevious && CLKNow == 1)
@@ -800,12 +805,12 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
         }
         else
         {
-          itemCounter = 13; //after the first menu item, we go back to the last menu item
+          itemCounter = 15; //after the first menu item, we go back to the last menu item
         }
       }
       else
       {
-        if (itemCounter < 13)
+        if (itemCounter < 15)
         {
           itemCounter = itemCounter +1;
         }
@@ -1315,7 +1320,63 @@ void processRotaryButton()
     }
     break;
 
-  case 8: //--Start/Stop reflow
+  case 8:  //--Warmup temperature
+    freeWarmUpTempSelected = !freeWarmUpTempSelected;
+
+    if (freeWarmUpTempSelected == true)
+    {
+      editMode = true;
+      tft.fillRoundRect(220, 2, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+      tft.setTextColor(RED);
+      tft.drawString(String(freeWarmUpTemp), 228, 4, 1);
+    }else{
+      tft.fillRoundRect(220, 2, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+      tft.setTextColor(RED);
+      tft.drawString(String(freeWarmUpTemp), 228, 4, 1);
+      editMode = false;
+    }
+    break;
+
+  case 9:  //--Warmup button
+    freeWarmUpButtonSelected = !freeWarmUpButtonSelected;
+
+    if (freeWarmUpButtonSelected == true)
+    {
+      reflow = false;
+      // clean the curve area
+      drawFreeCurve();
+
+      tft.fillRoundRect(260, 0, 60, 15, RectRadius, DGREEN); //X,Y, W,H, Color
+      tft.setTextColor(WHITE);
+      tft.drawString("STOP", 265, 0, 2);
+      //enableFreeHeating = true;
+      heatingEnabled = true; //start heating
+      //elapsedHeatingTime = 0; //set the elapsed time to 0
+    }
+    else
+    {
+      // First draw all the buttons (easy way out)
+      drawActionButtons();
+      // Then update the warmup field so it's still marked as selected so we know where we are
+      tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW);
+      tft.setTextColor(WHITE);
+      tft.drawString("WARMUP", 265, 0, 2);
+      //enableFreeHeating = false;
+      //freeHeatingOnOffSelected = false;
+      //---------------------------
+      //Put back all the values after stop
+      reflow = false; //Reset reflow status flag to false (so free heating can run)
+      redrawCurve = true; //simply redraw the whole graph
+      heatingEnabled = false; //stop heating
+      coolingFanEnabled = false; //stop cooling fan.
+      drawReflowCurve(); // redraw the curve with the values
+      // Reapply the highlight to the selected field
+      menuChanged = true; // Ensure menuChanged is set to true
+      updateHighlighting();
+
+    }
+    break;
+  case 10: //--Start/Stop reflow
     startStopButtonSelected = !startStopButtonSelected;
 
     if (startStopButtonSelected == true)
@@ -1359,7 +1420,7 @@ void processRotaryButton()
     }
     break;
 
-  case 9:  //--Free heating target temperature
+  case 11:  //--Free heating target temperature
     freeHeatingTargetSelected = !freeHeatingTargetSelected;
 
     if (freeHeatingTargetSelected == true)
@@ -1376,7 +1437,7 @@ void processRotaryButton()
     }
     break;
 
-  case 10: //--Start/stop free heating
+  case 12: //--Start/stop free heating
     freeHeatingOnOffSelected = !freeHeatingOnOffSelected;
 
     if (freeHeatingOnOffSelected == true)
@@ -1411,10 +1472,10 @@ void processRotaryButton()
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
       updateHighlighting();
-}
+  }
     break;
 
-  case 11: //--Free cooling temperature
+  case 13: //--Free cooling temperature
     freeCoolingTargetSelected = !freeCoolingTargetSelected;
 
     if (freeCoolingTargetSelected == true)
@@ -1432,7 +1493,7 @@ void processRotaryButton()
     }
     break;
 
-  case 12: //-- Start/stop free Cooling
+  case 14: //-- Start/stop free Cooling
     freeCoolingOnOffSelected = !freeCoolingOnOffSelected;
 
     if (freeCoolingOnOffSelected == true)
@@ -1470,7 +1531,7 @@ void processRotaryButton()
     }
     break;
 
-  case 13: // change the solder paste
+  case 15: // change the solder paste
     solderpasteFieldSelected = !solderpasteFieldSelected;
     if (solderpasteFieldSelected == true) {
       editMode = true;
@@ -1507,6 +1568,7 @@ void processRotaryButton()
       editMode = false;
     }
     break;
+
   }
   menuChanged = false;
 }
@@ -1514,7 +1576,7 @@ void processRotaryButton()
 /*
   updateHighlighting
 
-  This function is called every main loop cycle.
+  This function is called from various places in the code.
   Depending on the menu (=field), determined by the rotary encoder, update the information on the display
 
   Added a check for the edit mode so we keep the proper highlighting
@@ -1623,7 +1685,29 @@ void updateHighlighting()
 			tft.print(coolingTime);
 			break;
 
-		case 8: // Reflow start/stop
+      case 8: //warmup temp
+			if (editMode)
+			{
+        tft.fillRoundRect(220, 2, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+			}else{
+        tft.fillRoundRect(220, 2, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+      }
+      tft.setTextColor(BLUE);
+      tft.drawString(String(freeWarmUpTemp), 228, 4, 1);
+			break;
+      
+      case 9: // Warmup on/off
+      if (editMode)
+      {
+        tft.fillRoundRect(260, 0, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
+      }else{
+        tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
+      }
+      tft.setTextColor(BLACK);
+      tft.drawString("WARMUP", 265, 0, 2);
+      break;
+
+		case 10: // Reflow start/stop
       if (editMode)
       {
         tft.fillRoundRect(260, 20, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1634,7 +1718,7 @@ void updateHighlighting()
       tft.drawString("REFLOW", 265, 20, 2);
 			break;
 
-		case 9: // free heating target temp
+		case 11: // free heating target temp
       if (editMode)
       {
         tft.fillRoundRect(220, 42, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1645,7 +1729,7 @@ void updateHighlighting()
       tft.drawString(String(freeHeatingTemp), 228, 44, 1);		
 			break;
 
-		case 10: //Free heating on/off
+		case 12: //Free heating on/off
       if (editMode)
 			{
         tft.fillRoundRect(260, 40, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1656,7 +1740,7 @@ void updateHighlighting()
       tft.drawString("HEATING", 265, 40, 2);
 			break;
 
-		case 11: //free cooling temp
+		case 13: //free cooling temp
 			if (editMode)
 			{
         tft.fillRoundRect(220, 62, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1667,7 +1751,7 @@ void updateHighlighting()
       tft.drawString(String(freeCoolingTemp), 228, 64, 1);
 			break;
 
-    case 12: // Free cooling selected on/off
+    case 14: // Free cooling selected on/off
       if (editMode)
       {
         tft.fillRoundRect(260, 60, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
@@ -1677,10 +1761,9 @@ void updateHighlighting()
       tft.setTextColor(BLACK);
       tft.drawString("COOLING", 265, 60, 2);
 
-      //previousItemCounter = -1; //clear highlight status
       break;
 
-    case 13: // solderpast field
+    case 15: // solderpast field
       if (editMode) {
         tft.fillRoundRect(48, 0, 150, 18, RectRadius, GREEN); //X,Y, W,H, Color
       }else{
@@ -1753,37 +1836,48 @@ void updateHighlighting()
 			tft.print(coolingTime);
       tft.print("s");
 			break;
-		case 8: // Reflow start/stop
+    case 8: // warmup temp
+      tft.fillRoundRect(220, 2, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+      tft.setTextColor(RED);
+      tft.drawString(String(freeWarmUpTemp)+"C", 228, 4, 1);
+      break;
+    case 9: // warmup on/off
+      tft.fillRoundRect(260, 0, 60, 15, RectRadius, DGREEN); //X,Y, W,H, Color
+      tft.setTextColor(WHITE);
+      tft.drawString("WARMUP", 265, 0, 2);
+      break;
+		case 10: // Reflow start/stop
       tft.fillRoundRect(260, 20, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 20, 2);
 			break;
-		case 9: // free heating target temp
+		case 11: // free heating target temp
       tft.fillRoundRect(220, 42, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
       tft.setTextColor(RED);
       tft.drawString(String(freeHeatingTemp)+"C",228, 44, 1);
 			break;
-		case 10: // free heating on/off
+		case 12: // free heating on/off
       tft.fillRoundRect(260, 40, 60, 15, RectRadius, RED); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("HEATING", 265, 40, 2);
 			break;
-		case 11: // free cooling temp
+		case 13: // free cooling temp
       tft.fillRoundRect(220, 62, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
       tft.setTextColor(BLUE);
       tft.drawString(String(freeCoolingTemp)+"C", 228, 64, 1);
 			break;
-    case 12: // free cooling on/off
+    case 14: // free cooling on/off
       tft.fillRoundRect(260, 60, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("COOLING", 265, 60, 2);
       break;    
-    case 13: // solderpaste field
+    case 15: // solderpaste field
       tft.fillRoundRect(46, 0, 152, 20, RectRadius, BLACK); //erase the previous
       tft.setTextColor(WHITE);
       pasteName = solderpastes[solderPasteSelected].pasteName;
       tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
       break;
+
 		}
 		menuChanged = false;
 	}
