@@ -135,7 +135,7 @@ void updateHighlighting();
 void drawReflowCurve();
 void freeHeating();
 void freeCooling();
-void warmup();
+void runWarmup();
 void drawActionButtons();
 
 // setup the MAX library
@@ -482,7 +482,7 @@ void loop()
   measureTemperature();
 	updateHighlighting();
 	//drawReflowCurve(); //This is now done in the various functions
-  warmup();
+  runWarmup();
 	runReflow();
 	freeHeating();
 	freeCooling();
@@ -2199,9 +2199,9 @@ void freeCooling()
 }
 
 
-void warmup()
+void runWarmup()
 {
-	if (reflow == false) //Only proceed if the reflow was enabled by the press of the start button.
+	if (reflow == false) //Not needed?
 	{
 		if (enableWarmup == true) //If warmup was enabled start it
 		{
@@ -2226,7 +2226,7 @@ void warmup()
         // 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
         //...
         targetTemp = warmupTemp;
-        updateReflowState(TCCelsius, targetTemp, "Warmup");
+        //updateReflowState(TCCelsius, targetTemp, "Warmup");
         printTargetTemperature(); //Print the target temperature that we calculated above
         controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
 				elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
@@ -2402,11 +2402,15 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
   if (currentTemp < targetTemp)
   {
     digitalWrite(SSR_pin, HIGH);
-    if (reflow == true)
+    if (enableWarmup == true)
       tft.fillCircle(237, 7, 6, RED); // show SSR is on in reflow mode
+    if (reflow == true)
+      tft.fillCircle(237, 27, 6, RED); // show SSR is on in reflow mode  
   }else{
     digitalWrite(SSR_pin, LOW);
-    if (reflow == true)
+    if (enableWarmup == true)
       tft.fillCircle(237, 7, 6, GREEN); // show SSR is off in reflow mode
+    if (reflow == true)
+      tft.fillCircle(237, 27, 6, GREEN); // show SSR is off in reflow mode  
   }
 }
