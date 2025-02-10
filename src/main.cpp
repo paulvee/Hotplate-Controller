@@ -81,7 +81,7 @@ const String FW_VERSION = "V5.0.3";
   Fixed the highlighting issue with the buttons. When the action was stopped, the field was not highlighted.
 
   Todo:
-  
+
   Test hardware heat-up times with additional heaters and see if we need to change 
   the schematic or the code (two SSR's?, more K-type temp sensors?)
 
@@ -315,7 +315,7 @@ const int pasteNamePosY = 1; // position from the top of the TFT.
 double targetTemp = 0; //A variable that holds one of the above 4 target values temporarily, based on the actual part of the active heating phase
 volatile int freeHeatingTemp = 200; // Free heating target temperature
 volatile int freeCoolingTemp = 40;  // Free cooling target temperature
-
+volatile int freeWarmUpTemp = 40;   // Free heating warm-up temperature
 
 //Conversion formulas for converting the physical values (Temp and time) into pixel values.
 // Display is (YxX) 240x320px
@@ -909,30 +909,40 @@ void drawReflowCurve()
 
 void drawActionButtons(){
 
-    // Place the reflow/stop button
-    tft.fillRoundRect(260, 0, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
+    // place the pre-warm button
+    tft.fillRoundRect(260, 0, 60, 15, RectRadius, DGREEN); //X,Y, W,H, Color
     tft.setTextColor(WHITE);
-    tft.drawString("REFLOW", 265, 0, 2);
+    tft.drawString("WARMUP", 265, 0, 2);
+
+    // Free warmup value
+    tft.fillRoundRect(220, 0, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+    tft.setTextColor(RED);
+    tft.drawString(String(freeWarmUpTemp)+"C", 228, 4, 1);
+
+    // Place the reflow/stop button
+    tft.fillRoundRect(260, 20, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
+    tft.setTextColor(WHITE);
+    tft.drawString("REFLOW", 265, 20, 2);
 
     // Place the Heating/stop button
-    tft.fillRoundRect(260, 20, 60, 15, RectRadius, RED); //X,Y, W,H, Color
+    tft.fillRoundRect(260, 40, 60, 15, RectRadius, RED); //X,Y, W,H, Color
     tft.setTextColor(WHITE);
-    tft.drawString("HEATING", 265, 20, 2);
+    tft.drawString("HEATING", 265, 40, 2);
 
     // Free maximum Heating value
-    tft.fillRoundRect(220, 22, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+    tft.fillRoundRect(220, 42, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
     tft.setTextColor(RED);
-    tft.drawString(String(freeHeatingTemp)+"C", 228, 24, 1);
+    tft.drawString(String(freeHeatingTemp)+"C", 228, 44, 1);
 
     // Place the Free Cooling/stop button
-    tft.fillRoundRect(260, 40, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
+    tft.fillRoundRect(260, 60, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
     tft.setTextColor(WHITE);
-    tft.drawString("COOLING", 265, 39, 2);
+    tft.drawString("COOLING", 265, 60, 2);
 
     // Free minimum Cooling value
-    tft.fillRoundRect(220, 42, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+    tft.fillRoundRect(220, 62, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
     tft.setTextColor(BLUE);
-    tft.drawString(String(freeCoolingTemp)+"C", 228, 44, 1);
+    tft.drawString(String(freeCoolingTemp)+"C", 228, 64, 1);
 
 }
 
@@ -992,9 +1002,10 @@ void removeFieldsFromDisplay()
   tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 26, 24, 9, RectRadius, BLACK);
   tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
 
-  // Also remove the free cooling and free heating buttons and values
-  tft.fillRoundRect(220, 20, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
+  // Also remove the free warmup, cooling and heating buttons and values
+  tft.fillRoundRect(220, 0, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
   tft.fillRoundRect(220, 40, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
+  tft.fillRoundRect(220, 60, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
 
 }
 
@@ -1289,9 +1300,9 @@ void processRotaryButton()
       drawCurve(); // redraw the curve
 
       //Update the Reflow button to a green background and label it stop
-      tft.fillRoundRect(260, 0, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 20, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
       tft.setTextColor(RED);
-      tft.drawString("STOP", 265, 0, 2);
+      tft.drawString("STOP", 265, 20, 2);
 
       currentPhase = PREHEAT; //Set the current phase to preheat (in case we do a second reflow round)
       reflow = true; //Enable reflow
@@ -1301,9 +1312,9 @@ void processRotaryButton()
       // First, update all the buttons (easy way out)
       drawActionButtons();
       // update the reflow field so it's still marked as selected so we know where we are
-      tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW); // still highlighted
+      tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
-      tft.drawString("REFLOW", 265, 0, 2);
+      tft.drawString("REFLOW", 265, 20, 2);
 
       //---------------------------
       //Put back all the values after stop
@@ -1328,13 +1339,13 @@ void processRotaryButton()
     if (freeHeatingTargetSelected == true)
     {
       editMode = true;
-      tft.fillRoundRect(220, 22, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 42, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
       tft.setTextColor(RED);
-      tft.drawString(String(freeHeatingTemp), 224, 20, 2);
+      tft.drawString(String(freeHeatingTemp), 228, 44, 1);
     }else{
-      tft.fillRoundRect(220, 22, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 42, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
       tft.setTextColor(RED);
-      tft.drawString(String(freeHeatingTemp), 224, 24, 1);
+      tft.drawString(String(freeHeatingTemp), 228, 44, 1);
       editMode = false;
     }
     break;
@@ -1348,9 +1359,9 @@ void processRotaryButton()
       // clean the curve area
       drawFreeCurve();
 
-      tft.fillRoundRect(260, 20, 60, 15, RectRadius, RED); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 40, 60, 15, RectRadius, RED); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
-      tft.drawString("STOP", 265, 20, 2);
+      tft.drawString("STOP", 265, 40, 2);
       enableFreeHeating = true;
       heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
@@ -1358,9 +1369,9 @@ void processRotaryButton()
       // First draw all the buttons (easy way out)
       drawActionButtons();
       // update the heating field so it's still marked as selected so we know where we are
-      tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); // still highlighted
+      tft.fillRoundRect(260, 40, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
-      tft.drawString("HEATING", 265, 20, 2);
+      tft.drawString("HEATING", 265, 40, 2);
       enableFreeHeating = false;
       freeHeatingOnOffSelected = false;
       //---------------------------
@@ -1383,14 +1394,14 @@ void processRotaryButton()
     if (freeCoolingTargetSelected == true)
     {
       editMode = true;
-      tft.fillRoundRect(220, 42, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 62, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
       tft.setTextColor(BLUE);
-      tft.drawString(String(freeCoolingTemp), 224, 40, 2);
+      tft.drawString(String(freeCoolingTemp), 228, 64, 1);
     }else{
       // ending edit mode
-      tft.fillRoundRect(220, 42, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 62, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
       tft.setTextColor(BLUE);
-      tft.drawString(String(freeCoolingTemp), 224, 44, 1);
+      tft.drawString(String(freeCoolingTemp), 228, 64, 1);
       editMode = false;
     }
     break;
@@ -1404,9 +1415,9 @@ void processRotaryButton()
       // clean the curve area
       drawFreeCurve();
 
-      tft.fillRoundRect(260, 40, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 60, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
-      tft.drawString("STOP", 265, 39, 2);
+      tft.drawString("STOP", 265, 60, 2);
       enableFreeCooling = true;
       elapsedHeatingTime = 0; //set the elapsed time to 0
       digitalWrite(SSR_pin, LOW); // just in case it's still on when we select freecooling after freeheating
@@ -1414,9 +1425,9 @@ void processRotaryButton()
       // First draw all the buttons (easy way out)
       drawActionButtons();
       // Then update the cooling field so it's still marked as selected so we know where we are
-      tft.fillRoundRect(260, 40, 60, 15, RectRadius, YELLOW);
+      tft.fillRoundRect(260, 60, 60, 15, RectRadius, YELLOW);
       tft.setTextColor(WHITE);
-      tft.drawString("COOLING", 265, 39, 2);
+      tft.drawString("COOLING", 265, 60, 2);
       enableFreeCooling = false;
       freeCoolingOnOffSelected = false;
       //---------------------------
@@ -1589,56 +1600,56 @@ void updateHighlighting()
 		case 8: // Reflow start/stop
       if (editMode)
       {
-        tft.fillRoundRect(260, 0, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
+        tft.fillRoundRect(260, 20, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
       }else{
-        tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
+        tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
       }   
       tft.setTextColor(BLACK);
-      tft.drawString("REFLOW", 265, 0, 2);
+      tft.drawString("REFLOW", 265, 20, 2);
 			break;
 
 		case 9: // free heating target temp
       if (editMode)
       {
-        tft.fillRoundRect(220, 22, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+        tft.fillRoundRect(220, 42, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
       }else{
-        tft.fillRoundRect(220, 22, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+        tft.fillRoundRect(220, 42, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
       }
       tft.setTextColor(RED);
-      tft.drawString(String(freeHeatingTemp), 224, 20, 2);		
+      tft.drawString(String(freeHeatingTemp), 228, 44, 1);		
 			break;
 
 		case 10: //Free heating on/off
       if (editMode)
 			{
-        tft.fillRoundRect(260, 20, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
-      }else{
-        tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
-      }
-      tft.setTextColor(BLACK);
-      tft.drawString("HEATING", 265, 20, 2);
-			break;
-
-		case 11: //free cooling temp
-			if (editMode)
-			{
-        tft.fillRoundRect(220, 42, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
-			}else{
-        tft.fillRoundRect(220, 42, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
-      }
-      tft.setTextColor(BLUE);
-      tft.drawString(String(freeCoolingTemp), 224, 40, 2);
-			break;
-
-    case 12: // Free cooling selected on/off
-      if (editMode)
-      {
         tft.fillRoundRect(260, 40, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
       }else{
         tft.fillRoundRect(260, 40, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
       }
       tft.setTextColor(BLACK);
-      tft.drawString("COOLING", 265, 39, 2);
+      tft.drawString("HEATING", 265, 40, 2);
+			break;
+
+		case 11: //free cooling temp
+			if (editMode)
+			{
+        tft.fillRoundRect(220, 62, 32, 12, RectRadius, GREEN); //X,Y, W,H, Color
+			}else{
+        tft.fillRoundRect(220, 62, 32, 12, RectRadius, YELLOW); //X,Y, W,H, Color
+      }
+      tft.setTextColor(BLUE);
+      tft.drawString(String(freeCoolingTemp), 228, 64, 1);
+			break;
+
+    case 12: // Free cooling selected on/off
+      if (editMode)
+      {
+        tft.fillRoundRect(260, 60, 60, 15, RectRadius, GREEN); //X,Y, W,H, Color
+      }else{
+        tft.fillRoundRect(260, 60, 60, 15, RectRadius, YELLOW); //X,Y, W,H, Color
+      }
+      tft.setTextColor(BLACK);
+      tft.drawString("COOLING", 265, 60, 2);
 
       //previousItemCounter = -1; //clear highlight status
       break;
@@ -1717,29 +1728,29 @@ void updateHighlighting()
       tft.print("s");
 			break;
 		case 8: // Reflow start/stop
-      tft.fillRoundRect(260, 0, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 20, 60, 15, RectRadius, ORANGE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
-      tft.drawString("REFLOW", 265, 0, 2);
+      tft.drawString("REFLOW", 265, 20, 2);
 			break;
 		case 9: // free heating target temp
-      tft.fillRoundRect(220, 22, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 42, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
       tft.setTextColor(RED);
-      tft.drawString(String(freeHeatingTemp)+"C",224, 24, 1);
+      tft.drawString(String(freeHeatingTemp)+"C",228, 44, 1);
 			break;
 		case 10: // free heating on/off
-      tft.fillRoundRect(260, 20, 60, 15, RectRadius, RED); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 40, 60, 15, RectRadius, RED); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
-      tft.drawString("HEATING", 265, 20, 2);
+      tft.drawString("HEATING", 265, 40, 2);
 			break;
 		case 11: // free cooling temp
-      tft.fillRoundRect(220, 42, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
+      tft.fillRoundRect(220, 62, 32, 12, RectRadius, BLACK); //X,Y, W,H, Color
       tft.setTextColor(BLUE);
-      tft.drawString(String(freeCoolingTemp)+"C", 224, 44, 1);
+      tft.drawString(String(freeCoolingTemp)+"C", 228, 64, 1);
 			break;
     case 12: // free cooling on/off
-      tft.fillRoundRect(260, 40, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
+      tft.fillRoundRect(260, 60, 60, 15, RectRadius, BLUE); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
-      tft.drawString("COOLING", 265, 39, 2);
+      tft.drawString("COOLING", 265, 60, 2);
       break;    
     case 13: // solderpaste field
       tft.fillRoundRect(46, 0, 152, 20, RectRadius, BLACK); //erase the previous
@@ -1936,7 +1947,7 @@ void heating()
 					//Upon exiting, redraw the whole display and default everything
           tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED); //X,Y, W,H, Color
           tft.setTextColor(WHITE);
-          tft.drawString("REFLOW", 265, 0, 2);
+          tft.drawString("REFLOW", 265, 20, 2);
 
 					//---------------------------
 					//Put back all the values after stop
