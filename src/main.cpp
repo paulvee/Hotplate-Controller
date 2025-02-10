@@ -312,20 +312,20 @@ volatile int prev_coolingTime = coolingTime;
 const int pasteNamePosX = 50; // position from the left
 const int pasteNamePosY = 1; // position from the top of the TFT. 
 
-double targetTemp = 0; //A variable that holds one of the above 4 target values temporarily, based on the actual part of the active heating phase
-volatile int freeHeatingTemp = 200; // Free heating target temperature
-volatile int freeCoolingTemp = 40;  // Free cooling target temperature
-volatile int warmupTemp = 40;   // Free heating warm-up temperature
+double targetTemp = 0; //A variable that holds one of the 4 target values temporarily, based on the actual part of the active heating phase
+volatile int freeHeatingTemp = 200; // Free heating default target temperature
+volatile int freeCoolingTemp = 40;  // Free cooling default target target temperature
+volatile int warmupTemp = 38;   // Free heating warm-up default target temperature
 
 //Conversion formulas for converting the physical values (Temp and time) into pixel values.
 // Display is (YxX) 240x320px
 // 250 degrees max
-// px range is 18 from bottom and 80 from top
-double tempPixelFactor = 250.0 / (tftY - (60+18)); // y = 250 / 162 = 1.54 ~ 1.5°C per pixel on Y
+// px range is 13 from bottom and 80 from top
+double tempPixelFactor = 250.0 / (tftY - (60+13)); // y = 250 / 167 = 1.497 ~ 1.5°C per pixel on Y
 //-10: Axis is shifted by 18 from the bottom. 
 // 360 seconds max
-// px range is 18 from left and 2 from the right
-double timePixelFactor = 360.0 / (tftX - (18+2)); // x = 360 / 154 = 1.2 ~1.2s per pixel on X
+// px range is 18 from left and 2 from the right (320-2)
+double timePixelFactor = 360.0 / (tftX - (18+2)); // x = 360 / 300 = 1.2s per pixel on X
 //-18: Axis is shifted by 18 from the left and ends 2 pixels before the end of the screen: Available area for plotting: 320-(20) = 300 px.
 
 //Pixel conversions - converts the physical values (t, T) into pixel values for plotting the chart
@@ -1352,8 +1352,8 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("STOP", 265, 0, 2);
       enableWarmup = true;
-      heatingEnabled = true; //start heating
-      //elapsedHeatingTime = 0; //set the elapsed time to 0
+      //heatingEnabled = true; //start heating
+      elapsedHeatingTime = 0; //set the elapsed time to 0
     }
     else
     {
@@ -1364,13 +1364,13 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("WARMUP", 265, 0, 2);
       enableWarmup = false;
-      //freeHeatingOnOffSelected = false;
+      digitalWrite(SSR_pin, LOW); // turn the heater off
       //---------------------------
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      heatingEnabled = false; //stop heating
-      coolingFanEnabled = false; //stop cooling fan.
+      //heatingEnabled = false; //stop heating
+      tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off signal
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
@@ -1405,14 +1405,13 @@ void processRotaryButton()
       tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 20, 2);
-
+      digitalWrite(SSR_pin, LOW); // turn the heater off
       //---------------------------
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
-      coolingFanEnabled = false; //stop cooling fan.
-      //If user presses stop before the program is finished, we assume also that the fan is not needed
+      tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off signal
       // ending edit mode
       editMode = false;
       drawReflowCurve(); // redraw the curve with the values
@@ -1453,7 +1452,7 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("STOP", 265, 40, 2);
       enableFreeHeating = true;
-      heatingEnabled = true; //start heating
+      //heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }else{
       // First draw all the buttons (easy way out)
@@ -1469,7 +1468,7 @@ void processRotaryButton()
       digitalWrite(SSR_pin, LOW); // turn the heater off
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      heatingEnabled = false; //stop heating
+      //heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
@@ -1524,7 +1523,7 @@ void processRotaryButton()
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      heatingEnabled = false; //stop heating
+      //heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
@@ -2083,8 +2082,8 @@ void runReflow()
 					elapsedHeatingTime += (SSRInterval / 1000.0); //keep interval ticking
 
 					//Keep drawing the realtime temperature curve while the cooling is ongoing
-          measuredTemp_px = (int)((tftY - 5) - ((TCCelsius / tempPixelFactor)));
-					measuredTime_px = (int)(3 + (elapsedHeatingTime / timePixelFactor));
+          measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor)));
+					measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
 
 					//Keep printing the elapsed time and keep plotting the cooling portion of the curve
           printElapsedTime();
