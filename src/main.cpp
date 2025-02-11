@@ -147,6 +147,8 @@ MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
 TFT_eSPI tft = TFT_eSPI();
 const int tftX = 320;
 const int tftY = 240;
+const int yGraph = tftY-13; // the bottom of the graph
+const int xGraph = 18;      // the left side of the graph
 
 #define BLACK TFT_BLACK
 #define WHITE TFT_WHITE
@@ -2176,7 +2178,6 @@ void freeCooling()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
-        TCCelsius = 50;
 				//Draw a pixel for the temperature measurement - Calculate the position
 				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
         measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
@@ -2261,19 +2262,17 @@ void runWarmup()
 void drawAxis()
 {
 
-  // Draw the chart axes
+  // Draw the chart axes, tickmarks and values
    
   //Y-axis line (vertical - temperature): total 320px
-  //tft.drawLine(3, ((int)237-(250/tempPixelFactor)-10), 3, 237, RED); //X0, Y0, X1, Y1, Color  
-  //tft.drawLine(18, ((int)237-(250/tempPixelFactor)-25), 18, 237-13, RED); //X0, Y0, X1, Y1, Color
-  tft.drawLine(18, ((int)238-(250/tempPixelFactor))-12, 18, 238-13, RED); //X0, Y0, X1, Y1, Color
+    tft.drawLine(18, ((int)238-(250/tempPixelFactor))-12, 18, 238-13, RED); //X0, Y0, X1, Y1, Color
 
-  //Horizontal lines (ticks) at every 50C
-  tft.drawLine(13, (int)tftY-13-(50/tempPixelFactor), 22, (int)tftY-13-(50/tempPixelFactor), RED);   // 50C
-  tft.drawLine(13, (int)tftY-13-(100/tempPixelFactor), 22, (int)tftY-13-(100/tempPixelFactor), RED); //100C
-	tft.drawLine(13, (int)tftY-13-(150/tempPixelFactor), 22, (int)tftY-13-(150/tempPixelFactor), RED); //150C
-	tft.drawLine(13, (int)tftY-13-(200/tempPixelFactor), 22, (int)tftY-13-(200/tempPixelFactor), RED); //200C
-  tft.drawLine(13, (int)tftY-13-(250/tempPixelFactor), 22, (int)tftY-13-(250/tempPixelFactor), RED); //250C
+  //Horizontal lines (ticks) at every 50C (a line from from 13 left to 22 right)
+  tft.drawLine(13, (int)yGraph-(50/tempPixelFactor), 22, (int)yGraph-(50/tempPixelFactor), RED);   // 50C
+  tft.drawLine(13, (int)yGraph-(100/tempPixelFactor), 22, (int)yGraph-(100/tempPixelFactor), RED); //100C
+	tft.drawLine(13, (int)yGraph-(150/tempPixelFactor), 22, (int)yGraph-(150/tempPixelFactor), RED); //150C
+	tft.drawLine(13, (int)yGraph-(200/tempPixelFactor), 22, (int)yGraph-(200/tempPixelFactor), RED); //200C
+  tft.drawLine(13, (int)yGraph-(250/tempPixelFactor), 22, (int)yGraph-(250/tempPixelFactor), RED); //250C
 
   // tick values
   tft.drawString("50", 5, (int)tftY-17-(50/tempPixelFactor), 1); // text, x, y color
@@ -2283,37 +2282,29 @@ void drawAxis()
   tft.drawString("250", 0, (int)tftY-17-(250/tempPixelFactor), 1);
 
   //X-axis line (horizontal - time) : total 240px
-  tft.drawLine(18, 240-13, ((int)360/timePixelFactor), 240-13, WHITE); //X0, Y0, X1, Y1, Color
-  //tft.drawLine(18, 240-13, ((int)360/timePixelFactor)+10, 240-13, WHITE); //X0, Y0, X1, Y1, Color
-  //tft.drawLine(3, 237, ((int)300/timePixelFactor)+10, 237, WHITE); //X0, Y0, X1, Y1, Color
-
-	//Vertical lines (ticks) at every 30s
-  tft.drawLine(18+(int)30/timePixelFactor, 226, 18+(int)30/timePixelFactor, 222, WHITE);    // 30S
-	tft.drawLine(18+(int)60/timePixelFactor, 226, 18+(int)60/timePixelFactor, 220, WHITE);    // 60S
-	tft.drawLine(18+(int)90/timePixelFactor, 226, 18+(int)90/timePixelFactor, 222, WHITE);    // 90S
-	tft.drawLine(18+(int)120/timePixelFactor, 226, 18+(int)120/timePixelFactor, 220, WHITE);  //120S
-	tft.drawLine(18+(int)150/timePixelFactor, 226, 18+(int)150/timePixelFactor, 222, WHITE);  //150S
-	tft.drawLine(18+(int)180/timePixelFactor, 226, 18+(int)180/timePixelFactor, 220, WHITE);  //180S
-	tft.drawLine(18+(int)210/timePixelFactor, 226, 18+(int)210/timePixelFactor, 222, WHITE);  //210S
-	tft.drawLine(18+(int)240/timePixelFactor, 226, 18+(int)240/timePixelFactor, 220, WHITE);  //240S
-	tft.drawLine(18+(int)270/timePixelFactor, 226, 18+(int)270/timePixelFactor, 222, WHITE);  //270S	
-  tft.drawLine(18+(int)300/timePixelFactor, 226, 18+(int)300/timePixelFactor, 220, WHITE);  //300S
-  tft.drawLine(18+(int)330/timePixelFactor, 226, 18+(int)330/timePixelFactor, 222, WHITE);  //330S	
-  //tft.drawLine(18+(int)360/timePixelFactor, 226, 18+(int)360/timePixelFactor, 220, WHITE);  //360S
+  tft.drawLine(xGraph, yGraph, ((int)360/timePixelFactor), yGraph, WHITE); //X0, Y0, X1, Y1, Color
+ 
+	//Vertical lines (ticks) at every 30s; generate small (4px) and larger ticks (6px) at every 60s
+  tft.drawLine(xGraph+(int)30/timePixelFactor, 226, xGraph+(int)30/timePixelFactor, 222, WHITE);    // 30S
+	tft.drawLine(xGraph+(int)60/timePixelFactor, 226, xGraph+(int)60/timePixelFactor, 220, WHITE);    // 60S
+	tft.drawLine(xGraph+(int)90/timePixelFactor, 226, xGraph+(int)90/timePixelFactor, 222, WHITE);    // 90S
+	tft.drawLine(xGraph+(int)120/timePixelFactor, 226, xGraph+(int)120/timePixelFactor, 220, WHITE);  //120S
+	tft.drawLine(xGraph+(int)150/timePixelFactor, 226, xGraph+(int)150/timePixelFactor, 222, WHITE);  //150S
+	tft.drawLine(xGraph+(int)180/timePixelFactor, 226, xGraph+(int)180/timePixelFactor, 220, WHITE);  //180S
+	tft.drawLine(xGraph+(int)210/timePixelFactor, 226, xGraph+(int)210/timePixelFactor, 222, WHITE);  //210S
+	tft.drawLine(xGraph+(int)240/timePixelFactor, 226, xGraph+(int)240/timePixelFactor, 220, WHITE);  //240S
+	tft.drawLine(xGraph+(int)270/timePixelFactor, 226, xGraph+(int)270/timePixelFactor, 222, WHITE);  //270S	
+  tft.drawLine(xGraph+(int)300/timePixelFactor, 226, xGraph+(int)300/timePixelFactor, 220, WHITE);  //300S
+  tft.drawLine(xGraph+(int)330/timePixelFactor, 226, xGraph+(int)330/timePixelFactor, 222, WHITE);  //330S	
   
-  // tick values
-  //tft.drawString("30", ((int)30/timePixelFactor)-5, 230, 1);
-  tft.drawString("60", (18+(int)60/timePixelFactor)-5, 230, 1);
-  //tft.drawString("90", ((int)90/timePixelFactor)-5, 230, 1);
-  tft.drawString("120", (18+(int)120/timePixelFactor)-8, 230, 1);
-  //tft.drawString("150", ((int)150/timePixelFactor)-8, 230, 1);
-  tft.drawString("180", (18+(int)180/timePixelFactor)-8, 230, 1);
-  //tft.drawString("210", ((int)210/timePixelFactor)-8, 230, 1);
-  tft.drawString("240", (18+(int)240/timePixelFactor)-8, 230, 1);
-  //tft.drawString("270", ((int)270/timePixelFactor)-8, 230, 1);
-  tft.drawString("300", (18+(int)300/timePixelFactor)-8, 230, 1);
-  //tft.drawString("330", ((int)330/timePixelFactor)-8, 230, 1);
-  //tft.drawString("360", (18+(int)360/timePixelFactor)-8, 230, 1);
+
+  // tick values with justified numbers
+  tft.drawString("60", (xGraph+(int)60/timePixelFactor)-5, 230, 1);
+  tft.drawString("120", (xGraph+(int)120/timePixelFactor)-8, 230, 1);
+  tft.drawString("180", (xGraph+(int)180/timePixelFactor)-8, 230, 1);
+  tft.drawString("240", (xGraph+(int)240/timePixelFactor)-8, 230, 1);
+  tft.drawString("300", (xGraph+(int)300/timePixelFactor)-8, 230, 1);
+
 
 }
 
