@@ -225,8 +225,7 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 // -- PID controller
 // Define PID parameters
 double Setpoint, Input, Output;
-double Kp = 2.0, Ki = 1.0, Kd = 1.0; // Was 2.0,5.0,1.0
-//to reduce overshoot use 2.0, 0.0, 0.0 and start increasing Ki and Kd
+double Kp = 2.0, Ki = 5.0, Kd = 1.0; // original 2.0,5.0,1.0 (tried 2.0, 1.0, 1.0)
 
 // Create the PID controller object
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
@@ -1950,13 +1949,18 @@ void runReflow()
 
           updateReflowState(TCCelsius, targetTemp, "Preheat");
 					printTargetTemperature(); //Print the target temperature that we calculated above
-
+          
           // boost the startup preheat phase by turning on the SSR for a short time
-          if (elapsedHeatingTime < 30) // 30s
+          if (elapsedHeatingTime < 40 ) // boost for the first 40 seconds
           {
             analogWrite(SSR_pin, 255); // full power
+            // show the PWM output on the screen
+            tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED); 
+            tft.setTextColor(WHITE);
+            tft.drawString("PID @ Max", 202, 60, 2);
           } else {
             controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // start to regulate
+            tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); 
           }
 
           //Serial.print("delta time : "); Serial.println(preheatTime - elapsedHeatingTime); //Serial.print("  preheatTime : ");Serial.println(preheatTime);
@@ -2040,8 +2044,14 @@ void runReflow()
 
 					printTargetTemperature();
 					updateReflowState(TCCelsius, targetTemp, "Holding");
-					controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-
+          // see if we can already stop heating
+          if (TCCelsius > targetTemp)
+          {
+            heatingEnabled = false; // disable heating				
+            digitalWrite(SSR_pin, LOW); // just to make sure, turn off the SSR - heating is OFF
+          } else {
+            controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+          }
 					/*
 					  Serial.print("Reflow-holding target: ");
 					  Serial.print(targetTemp);
@@ -2059,9 +2069,9 @@ void runReflow()
 					//Serial.print("Cooling started.");
           updateReflowState(TCCelsius, targetTemp, "Cooling");
     
-					//Turn off heating
+					//Make sure we turn off the heating
 					heatingEnabled = false; // disable heating
-					digitalWrite(SSR_pin, LOW); // just to make sure, turn off the SSR - heating is OFF
+					digitalWrite(SSR_pin, LOW); // turn off the SSR - heating is OFF
 
 					//-----------------------------------------------------------------
 					//Turn on cooling
@@ -2421,17 +2431,20 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
   Setpoint = targetTemp; // Set the target temperature based on the current phase
   myPID.Compute(); //PID calculation
   
+  tft.setTextColor(WHITE);
+  tft.drawString("heating : "+String(int(heatingEnabled)), 50, 100, 2);
+
   if (heatingEnabled)
   {// Use the PID output to control the heating elements
     analogWrite(SSR_pin, int(Output));
-  } else{
+  } else {
     analogWrite(SSR_pin, 0); // Turn off the heating elements
   }
   //Serial.print("PID output: ");Serial.println(Output);
 
   // show the PWM output on the screen
-  tft.fillRoundRect(120, 60, 60, 16, RectRadius, DGREEN); 
+  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
   tft.setTextColor(WHITE);
-  tft.drawString("PID : "+String(int(Output)), 12, 60, 2);
+  tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
 }
