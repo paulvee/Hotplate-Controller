@@ -1916,8 +1916,8 @@ void runReflow()
 			{
 
         //Draw a pixel for the temperature measurement - Calculate the position
-				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor)));
-        measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+				measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
+        measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
 				//Also print the elapsed time in second"
         printElapsedTime();
@@ -2101,8 +2101,8 @@ void runReflow()
 					elapsedHeatingTime += (SSRInterval / 1000.0); //keep interval ticking
 
 					//Keep drawing the realtime temperature curve while the cooling is ongoing
-          measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor)));
-					measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+          measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
+					measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
 					//Keep printing the elapsed time and keep plotting the cooling portion of the curve
           printElapsedTime();
@@ -2139,8 +2139,8 @@ void freeHeating()
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
         //Draw a pixel for the temperature measurement - Calculate the position
-				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
-        measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
+        measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
 				//Also print the elapsed time in second
         printElapsedTime();
@@ -2179,8 +2179,8 @@ void freeCooling()
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
 				//Draw a pixel for the temperature measurement - Calculate the position
-				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
-        measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
+        measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
         Serial.print("measuredTemp_px: "); Serial.println(measuredTemp_px);
         Serial.print("measuredTime_px: "); Serial.println(measuredTime_px);
 
@@ -2231,8 +2231,8 @@ void runWarmup()
 			{
 
         // Calculate the position of the coordinates so we can plot it on the chart
-				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
-        measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
+				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
+        measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
 
 				//Also print the elapsed time in second
         printElapsedTime();
@@ -2265,7 +2265,7 @@ void drawAxis()
   // Draw the chart axes, tickmarks and values
    
   //Y-axis line (vertical - temperature): total 320px
-    tft.drawLine(18, ((int)238-(250/tempPixelFactor))-12, 18, 238-13, RED); //X0, Y0, X1, Y1, Color
+    tft.drawLine(xGraph, ((int)238-(250/tempPixelFactor))-12, xGraph, 238-13, RED); //X0, Y0, X1, Y1, Color
 
   //Horizontal lines (ticks) at every 50C (a line from from 13 left to 22 right)
   tft.drawLine(13, (int)yGraph-(50/tempPixelFactor), 22, (int)yGraph-(50/tempPixelFactor), RED);   // 50C
@@ -2324,7 +2324,7 @@ void drawCurve_old()
   // Draw the curve
   // starting center of x-y lines
 
-  tft.drawLine(18, 240 - 4-10, preheatTime_px, preheatTemp_px, YELLOW);
+  tft.drawLine(xGraph, yGraph, preheatTime_px, preheatTemp_px, YELLOW);
 	tft.drawLine(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
 	tft.drawLine(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
 	tft.drawLine(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
@@ -2362,7 +2362,7 @@ void drawCurve() {
   drawAxis();
 
   // Draw the curve using smooth interpolation
-  drawSmoothCurve(18, 240 - 14, preheatTime_px, preheatTemp_px, YELLOW);
+  drawSmoothCurve(xGraph, yGraph, preheatTime_px, preheatTemp_px, YELLOW);
   drawSmoothCurve(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
   drawSmoothCurve(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
   drawSmoothCurve(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
