@@ -1371,7 +1371,7 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("STOP", 265, 0, 2);
       enableWarmup = true;
-      //heatingEnabled = true; //start heating
+      heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }
     else
@@ -1388,7 +1388,7 @@ void processRotaryButton()
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      //heatingEnabled = false; //stop heating
+      heatingEnabled = false; //stop heating
       tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off signal
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
@@ -1471,7 +1471,7 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("STOP", 265, 40, 2);
       enableFreeHeating = true;
-      //heatingEnabled = true; //start heating
+      heatingEnabled = true; //start heating
       elapsedHeatingTime = 0; //set the elapsed time to 0
     }else{
       // First draw all the buttons (easy way out)
@@ -1487,7 +1487,7 @@ void processRotaryButton()
       digitalWrite(SSR_pin, LOW); // turn the heater off
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      //heatingEnabled = false; //stop heating
+      heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
@@ -1538,11 +1538,12 @@ void processRotaryButton()
       tft.drawString("COOLING", 265, 60, 2);
       enableFreeCooling = false;
       freeCoolingOnOffSelected = false;
+      heatingEnabled = false; //stop heating if still on
       //---------------------------
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
-      //heatingEnabled = false; //stop heating
+      heatingEnabled = false; //stop heating
       coolingFanEnabled = false; //stop cooling fan.
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
@@ -1946,11 +1947,17 @@ void runReflow()
 					// 2s later: 20 + (2 * (1/90) * (90-20)) = 20 + 1.56 = 21.6
 					// 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
 					//...
-					//updateReflowState(TCCelsius, targetTemp, "Preheat");
+
           updateReflowState(TCCelsius, targetTemp, "Preheat");
 					printTargetTemperature(); //Print the target temperature that we calculated above
-          controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-          //tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
+
+          // boost the startup preheat phase by turning on the SSR for a short time
+          if (elapsedHeatingTime < 30) // 30s
+          {
+            analogWrite(SSR_pin, 255); // full power
+          } else {
+            controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // start to regulate
+          }
 
           //Serial.print("delta time : "); Serial.println(preheatTime - elapsedHeatingTime); //Serial.print("  preheatTime : ");Serial.println(preheatTime);
           
@@ -2053,8 +2060,8 @@ void runReflow()
           updateReflowState(TCCelsius, targetTemp, "Cooling");
     
 					//Turn off heating
-					heatingEnabled = false; //disable heating
-					digitalWrite(SSR_pin, LOW); //turn off the SSR - heating is OFF
+					heatingEnabled = false; // disable heating
+					digitalWrite(SSR_pin, LOW); // just to make sure, turn off the SSR - heating is OFF
 
 					//-----------------------------------------------------------------
 					//Turn on cooling
@@ -2413,28 +2420,18 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
   Input = TCCelsius;
   Setpoint = targetTemp; // Set the target temperature based on the current phase
   myPID.Compute(); //PID calculation
-  // Use the PID output to control the heating element
-  analogWrite(SSR_pin, int(Output));
-  //Serial.print("PID output: ");Serial.println(Output);
-  tft.fillRoundRect(130, 60, 60, 16, RectRadius, DGREEN); 
-  tft.setTextColor(WHITE);
-  tft.drawString("PID : "+String(int(Output)), 132, 60, 2);
-
-
-  if (currentTemp < targetTemp)
-  {
-    if (enableWarmup == true)
-      tft.fillCircle(237, 7, 6, RED); // show SSR is on in reflow mode
-    if (reflow == true)
-      tft.fillCircle(237, 27, 6, RED); // show SSR is on in reflow mode  
-    if (enableFreeHeating == true)
-      tft.fillCircle(237, 47, 6, RED); // show SSR is on in reflow mode
-  }else{
-    if (enableWarmup == true)
-      tft.fillCircle(237, 7, 6, GREEN); // show SSR is off in reflow mode
-    if (reflow == true)
-      tft.fillCircle(237, 27, 6, GREEN); // show SSR is off in reflow mode  
-    if (enableFreeHeating == true)
-      tft.fillCircle(237, 47, 6, GREEN); // show SSR is off in reflow mode
+  
+  if (heatingEnabled)
+  {// Use the PID output to control the heating elements
+    analogWrite(SSR_pin, int(Output));
+  } else{
+    analogWrite(SSR_pin, 0); // Turn off the heating elements
   }
+  //Serial.print("PID output: ");Serial.println(Output);
+
+  // show the PWM output on the screen
+  tft.fillRoundRect(120, 60, 60, 16, RectRadius, DGREEN); 
+  tft.setTextColor(WHITE);
+  tft.drawString("PID : "+String(int(Output)), 12, 60, 2);
+
 }
