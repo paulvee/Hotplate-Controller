@@ -192,7 +192,7 @@ const int xGraph = 18;      // the left side of the graph
 // #define TFT_SKYBLUE     0x867D      /* 135, 206, 235 */
 // #define TFT_VIOLET      0x915C      /* 180,  46, 226 */
 
-
+#define OFF 0
 
 //Rotary encoder related
 int selectedItem = 1; //item number for the active menu item (was 0)
@@ -225,7 +225,7 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 // -- PID controller
 // Define PID parameters
 double Setpoint, Input, Output;
-double Kp = 2.0, Ki = 5.0, Kd = 1.0; // original 2.0,5.0,1.0 (tried 2.0, 1.0, 1.0)
+double Kp = 5.0, Ki = 10.0, Kd = 1.0; // original 2.0,5.0,1.0 (tried 2.0, 1.0, 1.0)
 
 // Create the PID controller object
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
@@ -278,7 +278,7 @@ solderpaste solderpastes[] = {
   165,  // reflowTemp
   240,  // reflowTime
   165,  // coolingTemp 
-  260,  // coolingTime
+  250,  // coolingTime start
   
   // Paste 1
   "Sn63/Pb37",
@@ -294,13 +294,13 @@ solderpaste solderpastes[] = {
   // Paste 2
   "Sn63/Pb37 Mod",
   100,
-  60, // changes this from unrealistic 30s to 60s
+  60, // changed this from an unrealistic 30s to 60s
   150,
   120,
   235,
   210,
   235,
-  220   
+  220
 };
 
 int solderPasteSelected = 0; // hold the index to the array of solderpastes
@@ -429,7 +429,7 @@ void setup()
 	DTPrevious = digitalRead(RotaryDT);
 	//-----
 	pinMode(SSR_pin, OUTPUT); //Define output pin for switching the SSR
-	digitalWrite(SSR_pin, LOW); //SSR is OFF by default
+	analogWrite(SSR_pin, OFF); //SSR is OFF by default
 	//----
 	pinMode(Fan_pin, OUTPUT); //Define output pin for switching the fan (transistor)
 	digitalWrite(Fan_pin, HIGH); //Enable fan - turn them on as a test to see if they spin up
@@ -503,7 +503,7 @@ void loop()
   runWarmup();
 	runReflow();
 	freeHeating();
-	freeCooling();
+	freeCooling(); 
 }
 
 
@@ -1382,7 +1382,7 @@ void processRotaryButton()
       tft.setTextColor(WHITE);
       tft.drawString("WARMUP", 265, 0, 2);
       enableWarmup = false;
-      digitalWrite(SSR_pin, LOW); // turn the heater off
+      analogWrite(SSR_pin, OFF); // turn the heater off
       //---------------------------
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
@@ -1423,7 +1423,7 @@ void processRotaryButton()
       tft.fillRoundRect(260, 20, 60, 15, RectRadius, YELLOW); // still highlighted
 		  tft.setTextColor(WHITE);
       tft.drawString("REFLOW", 265, 20, 2);
-      digitalWrite(SSR_pin, LOW); // turn the heater off
+      analogWrite(SSR_pin, OFF); // turn the heater off
       //---------------------------
       //Put back all the values after stop
       reflow = false; //Reset reflow status flag to false (so free heating can run)
@@ -1483,7 +1483,7 @@ void processRotaryButton()
       freeHeatingOnOffSelected = false;
       //---------------------------
       //Put back all the values after stop
-      digitalWrite(SSR_pin, LOW); // turn the heater off
+      analogWrite(SSR_pin, OFF); // turn the heater off
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
@@ -1527,7 +1527,7 @@ void processRotaryButton()
       tft.drawString("STOP", 265, 60, 2);
       enableFreeCooling = true;
       elapsedHeatingTime = 0; //set the elapsed time to 0
-      digitalWrite(SSR_pin, LOW); // just in case it's still on when we select freecooling after freeheating
+      analogWrite(SSR_pin, OFF); // just in case it's still on when we select freecooling after freeheating
     }else{
       // First draw all the buttons (easy way out)
       drawActionButtons();
@@ -1957,7 +1957,7 @@ void runReflow()
             // show the PWM output on the screen
             tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED); 
             tft.setTextColor(WHITE);
-            tft.drawString("PID @ Max", 202, 60, 2);
+            tft.drawString("BOOST", 202, 60, 2);
           } else {
             controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // start to regulate
             tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); 
@@ -2048,7 +2048,7 @@ void runReflow()
           if (TCCelsius > targetTemp)
           {
             heatingEnabled = false; // disable heating				
-            digitalWrite(SSR_pin, LOW); // just to make sure, turn off the SSR - heating is OFF
+            analogWrite(SSR_pin, OFF); // just to make sure, turn off the SSR - heating is OFF
           } else {
             controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
           }
@@ -2057,8 +2057,8 @@ void runReflow()
 					  Serial.print(targetTemp);
 					  Serial.println(" C");
 					*/
-
-					if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime) //check if we have reached the program target
+          //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
+					if (elapsedHeatingTime > coolingTime) //check if we have reached the program target
 					{
 						currentPhase = COOLING;
 					}
@@ -2071,7 +2071,7 @@ void runReflow()
     
 					//Make sure we turn off the heating
 					heatingEnabled = false; // disable heating
-					digitalWrite(SSR_pin, LOW); // turn off the SSR - heating is OFF
+					analogWrite(SSR_pin, OFF); // turn off the SSR - heating is OFF
 
 					//-----------------------------------------------------------------
 					//Turn on cooling
@@ -2092,7 +2092,7 @@ void runReflow()
 			}
 		}
 		else //heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
-		{
+		{ // *** This needs some more work to let the cooling period last longer
 			if (millis() - SSRTimer > SSRInterval) //update frequency = 1s - should be less frequent than the temperature readings
 			{
 				if (coolingFanEnabled == true && millis() - fanTimer > 120000) //If fan is enabled and 2 min elapsed
@@ -2218,7 +2218,7 @@ void freeCooling()
         //updateReflowState(TCCelsius, targetTemp, "Cooling");
         printTargetTemperature(); //Print the target temperature that we calculated above
         //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-        //digitalWrite(SSR_pin, HIGH);  // heater at full blast 
+        //analogWrite(SSR_pin, 255);  // heater at full blast 
         //tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
         if (TCCelsius > freeCoolingTemp) //Turn the fans ON or OFF depending on the flag
           {
@@ -2427,24 +2427,24 @@ void updateStatus(uint16_t color, const char* text)
 
 void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
-  Input = TCCelsius;
-  Setpoint = targetTemp; // Set the target temperature based on the current phase
-  myPID.Compute(); //PID calculation
-  
-  tft.setTextColor(WHITE);
-  tft.drawString("heating : "+String(int(heatingEnabled)), 50, 100, 2);
-
-  if (heatingEnabled)
-  {// Use the PID output to control the heating elements
+  // Check if the heating is enabled 
+  if (heatingEnabled == true)
+  {
+    // Use the PID to control the heating elements
+    Input = TCCelsius;
+    Setpoint = targetTemp; // Set the target temperature based on the current phase
+    myPID.Compute(); //PID calculation
     analogWrite(SSR_pin, int(Output));
+    // show the PWM output on the screen
+    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+    tft.setTextColor(WHITE);
+    tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
   } else {
-    analogWrite(SSR_pin, 0); // Turn off the heating elements
+    // stop heating
+    analogWrite(SSR_pin, OFF); // Turn off the heating elements
+    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+    tft.setTextColor(WHITE);
+    tft.drawString("PID OFF", 122, 60, 2);
   }
-  //Serial.print("PID output: ");Serial.println(Output);
-
-  // show the PWM output on the screen
-  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-  tft.setTextColor(WHITE);
-  tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
 }
