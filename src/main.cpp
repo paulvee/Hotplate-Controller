@@ -97,6 +97,7 @@ const String FW_VERSION = "V5.0.3";
 #include <ezButton.h> // for the rotary button press
 #include "MAX6675.h"
 #include <math.h>  // for the round() function
+#include <PID_v1.h>
 
 #define DSO_TRIG 4      // optional: to trace real-time activity on a scope
 
@@ -218,6 +219,15 @@ unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //update interval for switching the SSR - User is encouraged to experiment with this value
 double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
+
+// -- PID controller
+// Define PID parameters
+double Setpoint, Input, Output;
+double Kp = 2.0, Ki = 1.0, Kd = 1.0; // Was 2.0,5.0,1.0
+//to reduce overshoot use 2.0, 0.0, 0.0 and start increasing Ki and Kd
+
+// Create the PID controller object
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -399,8 +409,8 @@ void setup()
 	Serial.print("\n\r\n\rReflow controller ");
   Serial.println(FW_VERSION);
 
-  //Serial.print("tempPixelFactor = ");Serial.println(tempPixelFactor,3);
-  //Serial.print("timePixelFactor = ");Serial.println(timePixelFactor,3);
+  Serial.print("tempPixelFactor = ");Serial.println(tempPixelFactor,3);
+  Serial.print("timePixelFactor = ");Serial.println(timePixelFactor,3);
 
   SPI.begin(); //start hardware SPI
 
@@ -429,6 +439,13 @@ void setup()
   //-----
   thermoCouple.begin();
   thermoCouple.setSPIspeed(40000000);
+
+  //-----
+  Serial.println("setting up PID");
+  // Initialize the PID controller
+  Setpoint = 0; // Initial target temperature
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(0, 255); // Assuming the output range is 0-255 for PWM control
 
   //----- set the initial solderpaste values
   numSolderpastes = sizeof(solderpastes) / sizeof(solderpaste); // the size of the array of solderpastes
@@ -1895,7 +1912,8 @@ void runReflow()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
-				//Draw a pixel for the temperature measurement - Calculate the position
+
+        //Draw a pixel for the temperature measurement - Calculate the position
 				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor)));
         measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
 
@@ -1930,8 +1948,7 @@ void runReflow()
           updateReflowState(TCCelsius, targetTemp, "Preheat");
 					printTargetTemperature(); //Print the target temperature that we calculated above
           controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-          //digitalWrite(SSR_pin, HIGH);  // heater at full blast 
-          tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
+          //tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
 
           //Serial.print("delta time : "); Serial.println(preheatTime - elapsedHeatingTime); //Serial.print("  preheatTime : ");Serial.println(preheatTime);
           
@@ -2119,7 +2136,7 @@ void freeHeating()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
-				//Draw a pixel for the temperature measurement - Calculate the position
+        //Draw a pixel for the temperature measurement - Calculate the position
 				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
         measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
 
@@ -2159,9 +2176,12 @@ void freeCooling()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
+        TCCelsius = 50;
 				//Draw a pixel for the temperature measurement - Calculate the position
 				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
         measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+        Serial.print("measuredTemp_px: "); Serial.println(measuredTemp_px);
+        Serial.print("measuredTime_px: "); Serial.println(measuredTime_px);
 
 				//Also print the elapsed time in second
         printElapsedTime();
@@ -2177,7 +2197,7 @@ void freeCooling()
         // 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
         //...
         targetTemp = freeCoolingTemp;
-        updateReflowState(TCCelsius, targetTemp, "Cooling");
+        //updateReflowState(TCCelsius, targetTemp, "Cooling");
         printTargetTemperature(); //Print the target temperature that we calculated above
         //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
         //digitalWrite(SSR_pin, HIGH);  // heater at full blast 
@@ -2208,7 +2228,8 @@ void runWarmup()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
-				// Calculate the position of the coordinates so we can plot it on the chart
+
+        // Calculate the position of the coordinates so we can plot it on the chart
 				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
         measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
 
@@ -2248,18 +2269,18 @@ void drawAxis()
   tft.drawLine(18, ((int)238-(250/tempPixelFactor))-12, 18, 238-13, RED); //X0, Y0, X1, Y1, Color
 
   //Horizontal lines (ticks) at every 50C
-  tft.drawLine(18, (int)237-(50/tempPixelFactor), 22, (int)237-(50/tempPixelFactor), RED);   // 50C
-  tft.drawLine(18, (int)237-(100/tempPixelFactor), 22, (int)237-(100/tempPixelFactor), RED); //100C
-	tft.drawLine(18, (int)237-(150/tempPixelFactor), 22, (int)237-(150/tempPixelFactor), RED); //150C
-	tft.drawLine(18, (int)237-(200/tempPixelFactor), 22, (int)237-(200/tempPixelFactor), RED); //200C
-  tft.drawLine(18, (int)237-(250/tempPixelFactor), 22, (int)237-(250/tempPixelFactor), RED); //250C
+  tft.drawLine(13, (int)tftY-13-(50/tempPixelFactor), 22, (int)tftY-13-(50/tempPixelFactor), RED);   // 50C
+  tft.drawLine(13, (int)tftY-13-(100/tempPixelFactor), 22, (int)tftY-13-(100/tempPixelFactor), RED); //100C
+	tft.drawLine(13, (int)tftY-13-(150/tempPixelFactor), 22, (int)tftY-13-(150/tempPixelFactor), RED); //150C
+	tft.drawLine(13, (int)tftY-13-(200/tempPixelFactor), 22, (int)tftY-13-(200/tempPixelFactor), RED); //200C
+  tft.drawLine(13, (int)tftY-13-(250/tempPixelFactor), 22, (int)tftY-13-(250/tempPixelFactor), RED); //250C
 
   // tick values
-  tft.drawString("50", 5, (int)237-(50/tempPixelFactor)-3, 1); // text, x, y color
-  tft.drawString("100", 0, (int)237-(100/tempPixelFactor)-3, 1);
-  tft.drawString("150", 0, (int)237-(150/tempPixelFactor)-3, 1);
-  tft.drawString("200", 0, (int)237-(200/tempPixelFactor)-3, 1);
-  tft.drawString("250", 0, (int)237-(250/tempPixelFactor)-3, 1);
+  tft.drawString("50", 5, (int)tftY-17-(50/tempPixelFactor), 1); // text, x, y color
+  tft.drawString("100", 0, (int)tftY-17-(100/tempPixelFactor), 1);
+  tft.drawString("150", 0, (int)tftY-17-(150/tempPixelFactor), 1);
+  tft.drawString("200", 0, (int)tftY-17-(200/tempPixelFactor), 1);
+  tft.drawString("250", 0, (int)tftY-17-(250/tempPixelFactor), 1);
 
   //X-axis line (horizontal - time) : total 240px
   tft.drawLine(18, 240-13, ((int)360/timePixelFactor), 240-13, WHITE); //X0, Y0, X1, Y1, Color
@@ -2398,18 +2419,31 @@ void updateStatus(uint16_t color, const char* text)
 
 void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
+  Input = TCCelsius;
+  Setpoint = targetTemp; // Set the target temperature based on the current phase
+  myPID.Compute(); //PID calculation
+  // Use the PID output to control the heating element
+  analogWrite(SSR_pin, int(Output));
+  //Serial.print("PID output: ");Serial.println(Output);
+  tft.fillRoundRect(130, 60, 60, 16, RectRadius, DGREEN); 
+  tft.setTextColor(WHITE);
+  tft.drawString("PID : "+String(int(Output)), 132, 60, 2);
+
+
   if (currentTemp < targetTemp)
   {
-    digitalWrite(SSR_pin, HIGH);
     if (enableWarmup == true)
       tft.fillCircle(237, 7, 6, RED); // show SSR is on in reflow mode
     if (reflow == true)
       tft.fillCircle(237, 27, 6, RED); // show SSR is on in reflow mode  
+    if (enableFreeHeating == true)
+      tft.fillCircle(237, 47, 6, RED); // show SSR is on in reflow mode
   }else{
-    digitalWrite(SSR_pin, LOW);
     if (enableWarmup == true)
       tft.fillCircle(237, 7, 6, GREEN); // show SSR is off in reflow mode
     if (reflow == true)
       tft.fillCircle(237, 27, 6, GREEN); // show SSR is off in reflow mode  
+    if (enableFreeHeating == true)
+      tft.fillCircle(237, 47, 6, GREEN); // show SSR is off in reflow mode
   }
 }
