@@ -2092,8 +2092,12 @@ void runReflow()
                     updateStatus(DGREEN, WHITE, "Preheat");
                     printTargetTemperature();
                 
-                    if (preheatTime < preheatTime * 0.8) // stop heating at 80% of the preheat time
+                    if (elapsedHeatingTime < preheatTime * 0.8) // stop heating at 80% of the preheat time
+                    {
                       controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
+                    } else {
+                      controlSSR(0, TCCelsius, timeNow, SSRInterval);
+                    } 
 
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
@@ -2121,8 +2125,12 @@ void runReflow()
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
 
-                    if (soakingTime < soakingTime * 0.8) // stop heating at 80% of the soaking time
+                    if (elapsedHeatingTime < (reflowTime * 0.9)) // stop heating at 90% of the soaking time
+                    {
                       controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    } else {
+                      controlSSR(0, TCCelsius, timeNow, SSRInterval);
+                    } 
 
                     //if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
                     // when we have reached the reflowTemp, we can move to the hold phase
