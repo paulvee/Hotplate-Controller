@@ -126,6 +126,7 @@ void drawAxis();
 void drawCurve();
 void updateReflowState(double, double, const char*);
 void runReflow();
+void runReflowSim();
 void printTargetTemperature();
 void printElapsedTime();
 void controlSSR(double, double, unsigned long, unsigned long);
@@ -218,7 +219,7 @@ bool enableFreeHeating = false;
 bool enableFreeCooling = false;
 bool enableWarmup = false;
 unsigned long SSRTimer = 0; //Timer for switching the SSR
-unsigned long SSRInterval = 250; //update interval for switching the SSR - User is encouraged to experiment with this value
+unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
 double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 
@@ -501,7 +502,8 @@ void loop()
 	updateHighlighting();
 	//drawReflowCurve(); //This is now done in the various functions
   runWarmup();
-	runReflow();
+	//runReflow();
+  runReflowSim();
 	freeHeating();
 	freeCooling(); 
 }
@@ -1903,8 +1905,299 @@ void updateHighlighting()
 	}
 }
 
-
 void runReflow()
+{
+    if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
+    {
+        if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
+        {
+            unsigned long timeNow = millis();
+
+            if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
+            {
+                // Draw a pixel for the temperature measurement - Calculate the position
+                measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
+                measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+
+                // Also print the elapsed time in seconds
+                printElapsedTime();
+
+                // Draw the pixel (time vs. temperature) on the chart
+                tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+                tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
+
+                switch (currentPhase) // This part determines the code's progress along the reflow curve
+                {
+                case PREHEAT:
+                    targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
+                    updateReflowState(TCCelsius, targetTemp, "Preheat");
+                    printTargetTemperature();
+                    if (elapsedHeatingTime < 40)
+                    {
+                        analogWrite(SSR_pin, 255); // Full power
+                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED);
+                        tft.setTextColor(WHITE);
+                        tft.drawString("BOOST", 202, 60, 2);
+                    }
+                    else
+                    {
+                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Start to regulate
+                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK);
+                    }
+                    if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
+                    {
+                        currentPhase = SOAK;
+                    }
+                    break;
+
+                case SOAK:
+                    targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) * (1.0 / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Soaking");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime)
+                    {
+                        currentPhase = REFLOW;
+                    }
+                    break;
+
+                case REFLOW:
+                    targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Reflow");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
+                    {
+                        currentPhase = HOLD;
+                    }
+                    break;
+
+                case HOLD:
+                    targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Holding");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
+                    {
+                        currentPhase = COOLING;
+                    }
+                    break;
+
+                case COOLING:
+                    updateReflowState(TCCelsius, targetTemp, "Cooling");
+                    heatingEnabled = false; // Disable heating
+                    analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
+                    coolingFanEnabled = true; // Enable cooling
+                    digitalWrite(Fan_pin, HIGH); // Turn on the fan
+                    fanTimer = millis(); // Start fan timer from this period
+                    break;
+                }
+
+                elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
+                SSRTimer = millis();
+            }
+        }
+        else // Heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
+        {
+            if (millis() - SSRTimer > SSRInterval) // Update frequency = 1s - should be less frequent than the temperature readings
+            {
+                if (coolingFanEnabled == true && millis() - fanTimer > 120000) // If fan is enabled and 2 min elapsed
+                {
+                    digitalWrite(Fan_pin, LOW); // Turn off the fan after 2 min
+                    coolingFanEnabled = false; // Set the flag to the corresponding status
+                    reflow = false; // Reflow is finished
+                    tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED);
+                    tft.setTextColor(WHITE);
+                    tft.drawString("REFLOW", 265, 20, 2);
+                    redrawCurve = true; // Simply redraw the whole graph
+                    drawReflowCurve();
+                    heatingEnabled = false; // Stop heating
+                }
+
+                if (coolingFanEnabled == true) // If heating is disabled, but the cooling is enabled, keep drawing the chart
+                {
+                    elapsedHeatingTime += (SSRInterval / 1000.0); // Keep interval ticking
+                    measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
+                    measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+                    printElapsedTime();
+                    tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+                    tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, fake thick line
+                }
+
+                SSRTimer = millis();
+            }
+        }
+    }
+}
+
+
+
+/*
+Simulate Temperature Function:
+
+Added the simulateTemperature function to simulate the temperature value in TCCelsius based on the target temperature and elapsed time.
+Updated runReflow Function:
+
+Integrated the simulateTemperature function into the runReflow function.
+Adjusted the SSRInterval to 25 ms (10x faster).
+Adjusted the elapsedHeatingTime increment to account for the faster cycle.
+*/
+
+// Function to simulate the temperature value in TCCelsius
+double simulateTemperature(double targetTemp, double elapsedTime, double maxTime) {
+  // Simulate the temperature based on the target temperature and elapsed time
+  // This is a simple linear simulation for demonstration purposes
+  double simulatedTemp = targetTemp * (elapsedTime / maxTime);
+  return simulatedTemp;
+}
+
+void runReflowSim()
+{
+    if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
+    {
+        if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
+        {
+            unsigned long timeNow = millis();
+
+            if (timeNow - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
+            {
+                // Simulate the temperature value in TCCelsius
+                //TCCelsius = simulateTemperature(targetTemp, elapsedHeatingTime, (preheatTime + soakingTime + reflowTime + coolingTime));
+                TCCelsius = targetTemp; // For now, just set the temperature to the target temperature
+
+                // Draw a pixel for the temperature measurement - Calculate the position
+                measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
+                measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+
+                // Also print the elapsed time in seconds
+                printElapsedTime();
+
+                // Draw the pixel (time vs. temperature) on the chart
+                tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+                tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
+
+                switch (currentPhase) // This part determines the code's progress along the reflow curve
+                {
+                case PREHEAT:
+                    targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
+                    updateReflowState(TCCelsius, targetTemp, "Preheat");
+                    printTargetTemperature();
+
+                    if (elapsedHeatingTime < 4) // Boost for the first 4 seconds (10x faster)
+                    {
+                        analogWrite(SSR_pin, 255); // Full power
+                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED);
+                        tft.setTextColor(WHITE);
+                        tft.drawString("BOOST", 202, 60, 2);
+                    }
+                    else
+                    {
+                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Start to regulate
+                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); // remove the BOOST field
+                    }
+
+                    if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
+                    {
+                        currentPhase = SOAK;
+                    }
+                    break;
+
+                case SOAK:
+                    targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) * (1.0 / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Soaking");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+                    if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime)
+                    {
+                        currentPhase = REFLOW;
+                    }
+                    break;
+
+                case REFLOW:
+                    targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Reflow");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+                    if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
+                    {
+                        currentPhase = HOLD;
+                    }
+                    break;
+
+                case HOLD:
+                    targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
+                    printTargetTemperature();
+                    updateReflowState(TCCelsius, targetTemp, "Holding");
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+                    //if (TCCelsius > coolingTemp) && elapsedHeatingTime > coolingTime)
+                    if (elapsedHeatingTime > coolingTime)
+                    {
+                        currentPhase = COOLING;
+                    }
+                    break;
+
+                case COOLING:
+                    updateReflowState(TCCelsius, targetTemp, "Cooling");
+                    heatingEnabled = false; // Disable heating
+                    analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
+                    coolingFanEnabled = true; // Enable cooling
+                    digitalWrite(Fan_pin, HIGH); // Turn on the fan
+                    fanTimer = millis(); // Start fan timer from this period
+                    break;
+                }
+
+                elapsedHeatingTime += (SSRInterval / 100.0); // SSRInterval is in ms, so it has to be divided by 100 (10x faster)
+                SSRTimer = millis();
+            }
+        }
+        else // Heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
+        {
+            if (millis() - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
+            {
+                if (coolingFanEnabled == true && millis() - fanTimer > 12000) // If fan is enabled and 2 min elapsed (10x faster)
+                {
+                    digitalWrite(Fan_pin, LOW); // Turn off the fan after 2 min
+                    coolingFanEnabled = false; // Set the flag to the corresponding status
+                    reflow = false; // Reflow is finished
+
+                    // Upon exiting, redraw the whole display and default everything
+                    tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED);
+                    tft.setTextColor(WHITE);
+                    tft.drawString("REFLOW", 265, 20, 2);
+
+                    // Put back all the values after stop
+                    redrawCurve = true; // Simply redraw the whole graph
+                    drawReflowCurve();
+                    heatingEnabled = false; // Stop heating
+                }
+
+                if (coolingFanEnabled == true) // If heating is disabled, but the cooling is enabled, keep drawing the chart
+                {
+                    elapsedHeatingTime += (SSRInterval / 100.0); // Keep interval ticking (10x faster)
+
+                    // Keep drawing the realtime temperature curve while the cooling is ongoing
+                    measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
+                    measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+
+                    // Keep printing the elapsed time and keep plotting the cooling portion of the curve
+                    printElapsedTime();
+
+                    // Draw the actual curve
+                    tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+                    tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, fake thick line
+                }
+
+                SSRTimer = millis();
+            }
+        }
+    }
+}
+
+
+void runReflowOld()
 {
 	if (reflow == true)//Only proceed if the reflow was enabled by the press of the start button.
 	{
@@ -2045,20 +2338,20 @@ void runReflow()
 					printTargetTemperature();
 					updateReflowState(TCCelsius, targetTemp, "Holding");
           // see if we can already stop heating
-          if (TCCelsius > targetTemp)
-          {
-            heatingEnabled = false; // disable heating				
-            analogWrite(SSR_pin, OFF); // just to make sure, turn off the SSR - heating is OFF
-          } else {
+          //if (TCCelsius > targetTemp)
+          //{
+          //  heatingEnabled = false; // disable heating				
+          //  analogWrite(SSR_pin, OFF); // just to make sure, turn off the SSR - heating is OFF
+          //} else {
             controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-          }
+          //}
 					/*
 					  Serial.print("Reflow-holding target: ");
 					  Serial.print(targetTemp);
 					  Serial.println(" C");
 					*/
-          //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
-					if (elapsedHeatingTime > coolingTime) //check if we have reached the program target
+          if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
+					//if (elapsedHeatingTime > coolingTime) //check if we have reached the program target
 					{
 						currentPhase = COOLING;
 					}
@@ -2120,6 +2413,220 @@ void runReflow()
 					//Keep drawing the realtime temperature curve while the cooling is ongoing
           measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
 					measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+
+					//Keep printing the elapsed time and keep plotting the cooling portion of the curve
+          printElapsedTime();
+          
+          // draw the actual curve
+					tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+					tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); //putting another pixel next (on Y) the original, fake thick line
+				}
+
+				SSRTimer = millis();
+			}
+		}
+	}
+}
+
+void heating()
+{
+	if (reflow == true)//Only proceed if the reflow was enabled by the press of the start button.
+	{
+		if (heatingEnabled == true) //If heating was enabled somewhere in the code, we can enter the code below
+		{
+			unsigned long timeNow = millis();
+
+			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
+			{
+				//Draw a pixel for the temperature measurement - Calculate the position
+				measuredTemp_px = (int)((tftY - 13) - ((TCCelsius / tempPixelFactor)));
+        measuredTime_px = (int)(18 + (elapsedHeatingTime / timePixelFactor));
+
+				//Also print the elapsed time in second"
+        printElapsedTime();
+
+				//Send time and temperature to the serial port with a space (" ") separator, so it can be easily plotted
+				/*
+					Serial.print(elapsedHeatingTime);
+					Serial.print("  ");
+					Serial.println(TCCelsius);
+					Serial.println(" ");
+					//Send pixel values too
+					Serial.print(measuredTime_px);
+					Serial.print("  ");
+					Serial.println(measuredTemp_px);
+				*/
+
+				//Draw the pixel (time vs. temperature) on the chart
+				tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+				tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); //putting another pixel next (on Y) the original, "fake a thick line"
+
+				switch (currentPhase) //This part determines the code's progress along the reflow curve
+				{
+				case PREHEAT:
+					targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20)); //20! - this is important because it is also the zero of the axis
+					//Example: 20 + (0 * (1/90) * (90-20)) = 20 + 0 = 20
+					// 2s later: 20 + (2 * (1/90) * (90-20)) = 20 + 1.56 = 21.6
+					// 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
+					//...
+					//updateReflowState(TCCelsius, targetTemp, "Preheat");
+          updateReflowState(TCCelsius, targetTemp, "Preheat");
+					printTargetTemperature(); //Print the target temperature that we calculated above
+
+          digitalWrite(SSR_pin, HIGH);  // heater at full blast 
+          tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
+
+          //Serial.print("delta time : "); Serial.println(preheatTime - elapsedHeatingTime); //Serial.print("  preheatTime : ");Serial.println(preheatTime);
+          
+          // Serial.print("Preheat target: ");
+          // Serial.print(targetTemp);
+          // Serial.println(" C");
+          // Serial.print("Current temp: ");
+          // Serial.print(TCCelsius);
+          // Serial.println(" C");
+          // Serial.print("Delta temp: ");
+          // Serial.print(targetTemp - TCCelsius);
+          // Serial.println(" C");
+
+
+					if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime) //check if we have reached the program target
+					{
+						currentPhase = SOAK;
+					}
+					//Note: The following parts follow the same strategy. We calculate the expected temperature at the moment and based on the result
+					//we either turn the heater on (or keep it on), or turn the heater off (or keep it off). This is a very primitive control and it is
+					//not the most precise strategy, but at this moment, I go with this simple approach.
+					break;
+
+				case SOAK:
+
+					targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) * (1.0 / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp));
+					//Example: 90 + ((90-90) * (1/(180-90)) * (130-90) = 90
+					// 2s later: 90 +((92-90) * (1/90) * (40)) = 90 + 0.89 = 90.9
+					// 10s later: 90 +((100-90) * (1/90) * (40)) = 90 + 4.44 = 94.4
+					//. . .
+
+					printTargetTemperature();
+					updateReflowState(TCCelsius, targetTemp, "Soaking");
+          controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); //Control the SSR
+
+					/*
+					  Serial.print("Soak target: ");
+					  Serial.print(targetTemp);
+					  Serial.println(" C");
+            Serial.print("Current temp: ");
+					  Serial.print(TCCelsius);
+					  Serial.println(" C");
+					*/
+
+					if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime) //check if we have reached the program target
+					{
+						currentPhase = REFLOW;
+					}
+					break;
+
+				case REFLOW:
+
+					targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
+					//Example: 130 + ((180-180) * (1/(240-180)) * (165-130)) = 130
+					//2s later: 130 + ((182-180) * (1/60) * (35)) = 130 + 1.17 = 131.2
+					// 10s later: 130 + ((190-180) * (1/60) * (35)) = 130 + 5.83 = 135.8
+
+					printTargetTemperature();
+					updateReflowState(TCCelsius, targetTemp, "Reflow");
+					controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+					/*
+					  Serial.print("Reflow target: ");
+					  Serial.print(targetTemp);
+					  Serial.println(" C");
+					*/
+
+					if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime) //check if we have reached the program target
+					{
+						currentPhase = HOLD;
+					}
+					break;
+
+				case HOLD:
+
+					targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
+					//Example: 165 + ((240-240) * (1/(250-240)) * (165-165)) = 165
+					//2s later: 165 + ((242-240) * (1/10) * (0) = 165 + 2 = 165
+					//10s later: 165 + ((250-240) * (1/10) * (0) = 165 + 10 = 165
+
+					printTargetTemperature();
+					updateReflowState(TCCelsius, targetTemp, "Holding");
+					controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+					/*
+					  Serial.print("Reflow-holding target: ");
+					  Serial.print(targetTemp);
+					  Serial.println(" C");
+					*/
+
+					if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime) //check if we have reached the program target
+					{
+						currentPhase = COOLING;
+					}
+					break;
+
+				case COOLING:
+
+					//Serial.print("Cooling started.");
+          updateReflowState(TCCelsius, targetTemp, "Cooling");
+    
+					//Turn off heating
+					heatingEnabled = false; //disable heating
+					digitalWrite(SSR_pin, LOW); //turn off the SSR - heating is OFF
+
+					//-----------------------------------------------------------------
+					//Turn on cooling
+					coolingFanEnabled = true; //enable cooling
+					digitalWrite(Fan_pin, HIGH); //turn on the fan
+					fanTimer = millis(); //start fan timer from this period
+					break;
+				}
+
+				elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
+
+				/*
+				  Serial.print("Elapsed heating time: ");
+				  Serial.println(elapsedHeatingTime);
+				*/
+
+				SSRTimer = millis();
+			}
+		}
+		else //heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
+		{
+			if (millis() - SSRTimer > SSRInterval) //update frequency = 1s - should be less frequent than the temperature readings
+			{
+				if (coolingFanEnabled == true && millis() - fanTimer > 120000) //If fan is enabled and 2 min elapsed
+				{
+					digitalWrite(Fan_pin, LOW); //turn off the fan after 2 min
+					coolingFanEnabled = false; //Set the flag to the corresponding status
+					reflow = false; //Reflow is finished
+
+					//Upon exiting, redraw the whole display and default everything
+          tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED); //X,Y, W,H, Color
+          tft.setTextColor(WHITE);
+          tft.drawString("REFLOW", 265, 0, 2);
+
+					//---------------------------
+					//Put back all the values after stop
+					redrawCurve = true; //simply redraw the whole graph
+					drawReflowCurve();
+					heatingEnabled = false; //stop heating
+				}
+
+				if (coolingFanEnabled == true) //If heating is disabled, but the cooling is enabled, keep drawing the chart
+				{
+					elapsedHeatingTime += (SSRInterval / 1000.0); //keep interval ticking
+
+					//Keep drawing the realtime temperature curve while the cooling is ongoing
+          measuredTemp_px = (int)((tftY - 5) - ((TCCelsius / tempPixelFactor)));
+					measuredTime_px = (int)(3 + (elapsedHeatingTime / timePixelFactor));
 
 					//Keep printing the elapsed time and keep plotting the cooling portion of the curve
           printElapsedTime();
