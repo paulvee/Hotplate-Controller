@@ -90,8 +90,13 @@ const String FW_VERSION = "V5.0.3";
   Changed the drawActionButtons() code so it can handle a single line status message and set the text color and the background
   
   Version 5.4.0
-  Actual testing of the PID controller.
+  Switched back to using an on/off control for the heaters. The PID method does not give the results we want.
+  I'm after, for this application. The PID controller is too slow and the overshoot is too large.
+  The on-off method is much better, but there is still a lot of overshoot after the reflow phase, with the temperature
+  going up to 250°C and then dropping back to 200°C. This is not a problem for the solder paste I'm using, but it 
+  might be.
 
+  
 
   Todo:
 
@@ -2091,12 +2096,15 @@ void runReflow()
                     targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
                     updateStatus(DGREEN, WHITE, "Preheat");
                     printTargetTemperature();
-                
-                    if (elapsedHeatingTime < preheatTime * 0.8) // stop heating at 80% of the preheat time
+                    
+
+                    // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
+                    if ((elapsedHeatingTime < preheatTime * 0.8) && (TCCelsius <= targetTemp)) 
                     {
-                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
+                      analogWrite(SSR_pin, 255); // Full power
+                      //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
                     } else {
-                      controlSSR(0, TCCelsius, timeNow, SSRInterval);
+                      controlSSR(TCCelsius, TCCelsius, timeNow, SSRInterval); // do nothing, keep the temperature
                     } 
 
                     // determine if we can switch to the next phase
@@ -2108,7 +2116,6 @@ void runReflow()
 
                 case SOAK:
                     targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp);
-                    //targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) * (1.0 / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp));
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Soaking");
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
@@ -2121,20 +2128,21 @@ void runReflow()
 
                 case REFLOW:
                     targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp);
-                    //targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
 
-                    if (elapsedHeatingTime < (reflowTime * 0.9)) // stop heating at 90% of the soaking time
+                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
+                    
+                    // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
+                    if ((elapsedHeatingTime < reflowTime * 0.95) && (TCCelsius <= targetTemp)) // stop heating at 90% of the soaking time
                     {
-                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
                     } else {
-                      controlSSR(0, TCCelsius, timeNow, SSRInterval);
+                      controlSSR(TCCelsius, TCCelsius, timeNow, SSRInterval); // do nothing, keep the temperature
                     } 
 
-                    //if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
+                    if (TCCelsius > reflowTemp || elapsedHeatingTime > reflowTime)
                     // when we have reached the reflowTemp, we can move to the hold phase
-                    if (TCCelsius > reflowTemp)
                     {
                       currentPhase = HOLD;
                     }
