@@ -91,7 +91,7 @@ const String FW_VERSION = "V5.0.3";
   
   Version 5.4.0
   Actual testing of the PID controller.
-  
+
 
   Todo:
 
@@ -1036,9 +1036,16 @@ void measureTemperature()
 		// Serial.println(TCCelsius); //print converted data on the serial terminal
 
     //Update the text on the display whenever a reading is finished
-    tft.fillRoundRect(30, 40, 80, 16, RectRadius, DGREEN); //X,Y, W,H, Color
-		tft.setTextColor(WHITE);
-    tft.drawString("Temp "+String(int(TCCelsius))+"`C", 32, 40, 2); // can only print "°C" with font 2
+    if (TCCelsius > 500)
+    {
+      tft.fillRoundRect(30, 40, 80, 16, RectRadius, RED); //X,Y, W,H, Color
+      tft.setTextColor(WHITE);
+      tft.drawString("Temp ERROR", 32, 40, 2); // Possibly a grounding error?
+    } else {
+      tft.fillRoundRect(30, 40, 80, 16, RectRadius, DGREEN); //X,Y, W,H, Color
+      tft.setTextColor(WHITE);
+      tft.drawString("Temp "+String(int(TCCelsius))+"`C", 32, 40, 2); // can only print "°C" with font 2
+    }
 
     temperatureTimer = millis(); //reset timer
 	}
@@ -2084,20 +2091,9 @@ void runReflow()
                     targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
                     updateStatus(DGREEN, WHITE, "Preheat");
                     printTargetTemperature();
-                    /*
-                    if (elapsedHeatingTime < 40) // Boost for the first 40 seconds ; ** while simulating, use 4s instead of 40s
-                    {
-                        analogWrite(SSR_pin, 255); // Full power
-                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED);
-                        tft.setTextColor(WHITE);
-                        tft.drawString("BOOST", 202, 60, 2);
-                    }
-                    else
-                    {
-                    */
-                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
-                        //tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); // remove the BOOST field
-                    //}
+                
+                    if (preheatTime < preheatTime * 0.8) // stop heating at 80% of the preheat time
+                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
 
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
@@ -2124,7 +2120,9 @@ void runReflow()
                     //targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+                    if (soakingTime < soakingTime * 0.8) // stop heating at 80% of the soaking time
+                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
 
                     //if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
                     // when we have reached the reflowTemp, we can move to the hold phase
@@ -2137,12 +2135,13 @@ void runReflow()
                 case HOLD:
                     targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp);
                     //targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
+                    targetTemp = reflowTemp; // keep the temperature at the reflow temperature
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Holding");
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
 
                     //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
-                    // when we have reached the coolingTime, we can move to the cooling phase
+                    // when we have reached the coolingTime limit, we can move to the cooling phase
                     if (elapsedHeatingTime > coolingTime)
                     {
                         currentPhase = COOLING;
