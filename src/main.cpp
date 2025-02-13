@@ -1431,6 +1431,7 @@ void processRotaryButton()
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
+      digitalWrite(Fan_pin, LOW); // turn the cooling fan off, the user select the free cooling mode if desired
       tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off signal
       // ending edit mode
       editMode = false;
@@ -1489,7 +1490,6 @@ void processRotaryButton()
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
-      coolingFanEnabled = false; //stop cooling fan.
       drawReflowCurve(); // redraw the curve with the values
       // Reapply the highlight to the selected field
       menuChanged = true; // Ensure menuChanged is set to true
@@ -1987,7 +1987,6 @@ void runReflow()
                     updateReflowState(TCCelsius, targetTemp, "Cooling");
                     heatingEnabled = false; // Disable heating
                     analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
-                    coolingFanEnabled = true; // Enable cooling
                     digitalWrite(Fan_pin, HIGH); // Turn on the fan
                     fanTimer = millis(); // Start fan timer from this period
                     break;
@@ -2033,37 +2032,27 @@ void runReflow()
 
 
 /*
-Simulate Temperature Function:
+Simulate the reflow mode
 
-Added the simulateTemperature function to simulate the temperature value in TCCelsius based on the target temperature and elapsed time.
-Updated runReflow Function:
+Activate:
+ TCCelsius = targetTemp;
+ elapsedHeatingTime to 100.0 (10x) faster at the end of the function
 
-Integrated the simulateTemperature function into the runReflow function.
-Adjusted the SSRInterval to 25 ms (10x faster).
-Adjusted the elapsedHeatingTime increment to account for the faster cycle.
 */
-
-// Function to simulate the temperature value in TCCelsius
-double simulateTemperature(double targetTemp, double elapsedTime, double maxTime) {
-  // Simulate the temperature based on the target temperature and elapsed time
-  // This is a simple linear simulation for demonstration purposes
-  double simulatedTemp = targetTemp * (elapsedTime / maxTime);
-  return simulatedTemp;
-}
 
 void runReflowSim()
 {
     if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
     {
-        if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
+        if (elapsedHeatingTime < 340) // run until the end of the scale
+        //if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
         {
             unsigned long timeNow = millis();
 
             if (timeNow - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
             {
-                // Simulate the temperature value in TCCelsius
-                //TCCelsius = simulateTemperature(targetTemp, elapsedHeatingTime, (preheatTime + soakingTime + reflowTime + coolingTime));
-                TCCelsius = targetTemp; // For now, just set the temperature to the target temperature
+                // *** Simulate the temperature value in TCCelsius
+                TCCelsius = targetTemp; // To simulate, set the temperature to the target temperature
 
                 // Draw a pixel for the temperature measurement - Calculate the position
                 measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
@@ -2144,15 +2133,16 @@ void runReflowSim()
                     heatingEnabled = false; // Disable heating
                     analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
                     coolingFanEnabled = true; // Enable cooling
-                    digitalWrite(Fan_pin, HIGH); // Turn on the fan
-                    fanTimer = millis(); // Start fan timer from this period
+                    digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
+                    //fanTimer = millis(); // Start fan timer from this period
                     break;
                 }
-
-                elapsedHeatingTime += (SSRInterval / 100.0); // SSRInterval is in ms, so it has to be divided by 100 (10x faster)
+                // *** set interval to 100.0 (10x faster) when simulating
+                elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 100 (10x faster)
                 SSRTimer = millis();
             }
         }
+        /*
         else // Heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
         {
             if (millis() - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
@@ -2192,7 +2182,8 @@ void runReflowSim()
 
                 SSRTimer = millis();
             }
-        }
+          
+        */
     }
 }
 
@@ -2907,20 +2898,13 @@ void printTargetTemperature() //Momentary target temperature which is derived fr
 
 void updateReflowState(double currentTemp, double targetTemperature, const char* statusText)
 {	
-	if (currentTemp < targetTemperature) //Check if the measured temperature is below the target
-	{
-		updateStatus(DGREEN, statusText); //print reflow phase in green box to indicate approach
-	}else{ //measured temperature is ABOVE the target
-		updateStatus(ORANGE, statusText); //Print reflow phase in red box to indicate overshoot
-	}
-  if (statusText == "Cooling")
-  {
-    updateStatus(BLUE, statusText); //Blue box to show the free cooling phase
-  }
-    if (statusText == "Heating")
-  {
-    updateStatus(RED, statusText); //Blue box to show the free heating phase
-  }
+  // reflow mode
+	updateStatus(DGREEN, statusText); //print reflow phase in green box to indicate approach
+
+  if (enableFreeHeating == true)
+    updateStatus(RED, statusText);
+  if (enableFreeCooling == true)
+    updateStatus(BLUE, statusText);
 }
 
 
