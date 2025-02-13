@@ -78,12 +78,13 @@ const String FW_VERSION = "V5.0.3";
   Removed the free heating and free cooling fields from the display when we reflow.
   
   Version 5.0.3
+  Added a "warm-up" phase for the free heating, so we can heat up the board before we start the reflow.
+  Added PID controller for the heating elements.
   Fixed the highlighting issue with the buttons. When the action was stopped, the field was not highlighted.
   Fixed an error in the display curve that was using the old offset for the x/y axis.
-  Changed the runReflow() function so it can be ran as a simulation at 10x the speed, without actual heating
+  Changed the runReflow() function a bit so it can be ran as a simulation at 10x the speed, without actual heating
   Changed the runReflow() function cooling phase and let it run until we are at the end of the display (340s)
-  Changed the renReflow() function with updated actual temperature and time display calculations.
-  Added a "warm-up" phase for the free heating, so we can heat up the board before we start the reflow.
+  Changed the runReflow() function with updated actual temperature and time display calculations.
   Changed the updateStatus() code so it can handle a single line status message and set the text color and the background
   color of the status message. Setting both to black will erase the field.
 
