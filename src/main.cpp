@@ -2442,7 +2442,7 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 }
 
 
-void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
+void controlSSR_PID(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
   // Check if the heating is enabled 
   if (heatingEnabled == true)
@@ -2464,4 +2464,28 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
     tft.drawString("PID OFF", 122, 60, 2);
   }
 
+}
+
+void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
+{	
+  // Check if the heating is enabled 
+  if (heatingEnabled == true)
+  {
+    if (currentTemp < targetTemp)
+    {
+      Output = 255;
+      analogWrite(SSR_pin, Output);
+      // show the PWM output on the screen
+      tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+      tft.setTextColor(WHITE);
+      tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+    } else {
+      // stop heating
+      Output = OFF;
+      analogWrite(SSR_pin, Output); // Turn off the heating elements
+      tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+      tft.setTextColor(WHITE);
+      tft.drawString("PID OFF", 122, 60, 2);
+    }
+  }
 }
