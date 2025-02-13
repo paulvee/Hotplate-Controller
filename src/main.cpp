@@ -17,15 +17,15 @@ const String FW_VERSION = "V5.0.3";
   Version V2.0.0:
   original code with updated splash screen
 
-  Version V2.0.1:
+  Version V2.1.0:
   fixing the use of no-name TFT displays, but that requires changing one of the library files.
 
-  Version V2.0.2:
+  Version V2.2.0:
   fixing the drawing of the curve when there is no change
   fixing the field color while in the edit mode and setting it back when exiting the edit mode
   changed the button detection to an ISR to get a better response
 
-  Version V2.0.3:
+  Version V2.3.0:
   Fixed the no-name TFT display color code definitions and replaced all ST77XX definitions to ST7735.
   The library file does no longer need to get edited.
 
@@ -36,7 +36,7 @@ const String FW_VERSION = "V5.0.3";
   Changed the button code back to (delayed) polling, cannot use an ISR with the ESP and this code due to the many tft activities
   The rotary ISR now required a Schmitt-trigger gate on the CLK pin to eliminate many triggers in the undetermined zone of the edge
 
-  Version V3.0.1:
+  Version V3.1.0:
   Changed the rotary button service to a library, changed the processing
   Fixed the depricated var++ and var-- increments and decrements
   Changed references from Triac to SSR
@@ -54,7 +54,7 @@ const String FW_VERSION = "V5.0.3";
   Version 5.0.0:
   Changed the TFT library to TFT_eSPI.h to add more features and make it faster
 
-  Version 5.0.1:
+  Version 5.1.0:
   Redid the screen layout and deleted the second screen.
   There are now buttons on the main screen for free heating and free cooling.
   You can set the maximum temp for free heating and the minimum temp for free cooling.
@@ -68,7 +68,7 @@ const String FW_VERSION = "V5.0.3";
   Split out code that was used in multiple places.
   Many small enhancements and many more comments and clean-ups
 
-  Version 5.0.2:
+  Version 5.2.0:
   Switched to Virtual Studio Code and PlatformIO, and started using Git for version control.
   Also used the Copilot AI to help with the code for the DrawGraph() function.
   It is now using a more natural curve instead of straight lines between the points,
@@ -77,7 +77,7 @@ const String FW_VERSION = "V5.0.3";
   Moved the preheat temp and time fields a bit out of the way of the curve.
   Removed the free heating and free cooling fields from the display when we reflow.
   
-  Version 5.0.3
+  Version 5.3.0
   Added a "warm-up" phase for the free heating, so we can heat up the board before we start the reflow.
   Added PID controller for the heating elements.
   Fixed the highlighting issue with the buttons. When the action was stopped, the field was not highlighted.
@@ -87,7 +87,11 @@ const String FW_VERSION = "V5.0.3";
   Changed the runReflow() function with updated actual temperature and time display calculations.
   Changed the updateStatus() code so it can handle a single line status message and set the text color and the background
   color of the status message. Setting both to black will erase the field.
-
+  Changed the drawActionButtons() code so it can handle a single line status message and set the text color and the background
+  
+  Version 5.4.0
+  Actual testing of the PID controller.
+  
 
   Todo:
 
@@ -133,13 +137,10 @@ const String FW_VERSION = "V5.0.3";
 void rotaryEncoderISR();
 void drawAxis();
 void drawCurve();
-void updateStatus(uint16_t, uint16_t, const char*);
 void runReflow();
-void runReflowSim();
 void printTargetTemperature();
 void printElapsedTime();
 void controlSSR(double, double, unsigned long, unsigned long);
-void updateStatus(uint16_t, const char*);
 void processRotaryButton();
 void measureTemperature();
 void updateHighlighting();
@@ -147,6 +148,7 @@ void drawReflowCurve();
 void freeHeating();
 void freeCooling();
 void runWarmup();
+void updateStatus(uint16_t, uint16_t, const char*);
 void drawActionButtons();
 
 // setup the MAX library
@@ -511,8 +513,7 @@ void loop()
 	updateHighlighting();
 	//drawReflowCurve(); //This is now done in the various functions
   runWarmup();
-	//runReflow();
-  runReflowSim();
+  runReflow();
 	freeHeating();
 	freeCooling(); 
 }
@@ -1916,7 +1917,7 @@ void updateHighlighting()
 	}
 }
 
-void runReflow()
+void runReflow_old()
 {
     if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
     {
@@ -2043,7 +2044,7 @@ void runReflow()
 
 
 /*
-Simulate the reflow mode
+When you simulate the reflow mode
 
 Activate:
  TCCelsius = targetTemp;
@@ -2051,16 +2052,15 @@ Activate:
 
 */
 
-void runReflowSim()
+void runReflow()
 {
     if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
     {
-        if (elapsedHeatingTime < 340) // run until the end of the scale
-        //if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
+        if (elapsedHeatingTime < 340) // continue to run until the end of the time scale or when user stopped it
         {
             unsigned long timeNow = millis();
 
-            if (timeNow - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
+            if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
             {
                 // *** Simulate the temperature value in TCCelsius
                 //TCCelsius = targetTemp; // To simulate, set the temperature to the target temperature
@@ -2069,10 +2069,10 @@ void runReflowSim()
                 measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
                 measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
-                // Also print the elapsed time in seconds
+                // Print the elapsed time in seconds
                 printElapsedTime();
 
-                // Draw the pixel (time vs. temperature) on the chart
+                // Draw the pixel (time vs. temperature) on the graph
                 tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
                 // can draw a thicker line by activating the next statement
                 //tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
@@ -2080,6 +2080,7 @@ void runReflowSim()
                 switch (currentPhase) // This part determines the code's progress along the reflow curve
                 {
                 case PREHEAT:
+                    // calculate the desired temperature based on the elapsed time
                     targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
                     updateStatus(DGREEN, WHITE, "Preheat");
                     printTargetTemperature();
@@ -2094,10 +2095,11 @@ void runReflowSim()
                     else
                     {
                     */
-                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Start to regulate
-                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); // remove the BOOST field
+                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
+                        //tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK); // remove the BOOST field
                     //}
 
+                    // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
                     {
                         currentPhase = SOAK;
@@ -2125,6 +2127,7 @@ void runReflowSim()
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
 
                     //if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
+                    // when we have reached the reflowTemp, we can move to the hold phase
                     if (TCCelsius > reflowTemp)
                     {
                         currentPhase = HOLD;
@@ -2139,6 +2142,7 @@ void runReflowSim()
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
 
                     //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
+                    // when we have reached the coolingTime, we can move to the cooling phase
                     if (elapsedHeatingTime > coolingTime)
                     {
                         currentPhase = COOLING;
@@ -2161,48 +2165,6 @@ void runReflowSim()
                 SSRTimer = millis();
             }
         }
-        /*
-        else // Heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
-        {
-            if (millis() - SSRTimer > SSRInterval) // Update frequency = 25 ms - 10x faster
-            {
-                if (coolingFanEnabled == true && millis() - fanTimer > 12000) // If fan is enabled and 2 min elapsed (10x faster)
-                {
-                    digitalWrite(Fan_pin, LOW); // Turn off the fan after 2 min
-                    coolingFanEnabled = false; // Set the flag to the corresponding status
-                    reflow = false; // Reflow is finished
-
-                    // Upon exiting, redraw the whole display and default everything
-                    tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED);
-                    tft.setTextColor(WHITE);
-                    tft.drawString("REFLOW", 265, 20, 2);
-
-                    // Put back all the values after stop
-                    redrawCurve = true; // Simply redraw the whole graph
-                    drawReflowCurve();
-                    heatingEnabled = false; // Stop heating
-                }
-
-                if (coolingFanEnabled == true) // If heating is disabled, but the cooling is enabled, keep drawing the chart
-                {
-                    elapsedHeatingTime += (SSRInterval / 100.0); // Keep interval ticking (10x faster)
-
-                    // Keep drawing the realtime temperature curve while the cooling is ongoing
-                    measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
-                    measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
-
-                    // Keep printing the elapsed time and keep plotting the cooling portion of the curve
-                    printElapsedTime();
-
-                    // Draw the actual curve
-                    tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-                    tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, fake thick line
-                }
-
-                SSRTimer = millis();
-            }
-          
-        */
     }
 }
 
