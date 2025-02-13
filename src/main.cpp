@@ -2102,7 +2102,7 @@ void runReflow()
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
                     {
-                        currentPhase = SOAK;
+                      currentPhase = SOAK;
                     }
                     break;
 
@@ -2115,7 +2115,7 @@ void runReflow()
 
                     if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime)
                     {
-                        currentPhase = REFLOW;
+                      currentPhase = REFLOW;
                     }
                     break;
 
@@ -2136,7 +2136,7 @@ void runReflow()
                     // when we have reached the reflowTemp, we can move to the hold phase
                     if (TCCelsius > reflowTemp)
                     {
-                        currentPhase = HOLD;
+                      currentPhase = HOLD;
                     }
                     break;
 
@@ -2152,7 +2152,7 @@ void runReflow()
                     // when we have reached the coolingTime limit, we can move to the cooling phase
                     if (elapsedHeatingTime > coolingTime)
                     {
-                        currentPhase = COOLING;
+                      currentPhase = COOLING;
                     }
                     break;
 
