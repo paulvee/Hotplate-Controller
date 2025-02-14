@@ -95,10 +95,16 @@ const String FW_VERSION = "V5.0.3";
   The on-off method is much better, but there is still a lot of overshoot after the reflow phase, with the temperature
   going up to 250°C and then dropping back to 200°C. This may not a problem for the solder paste I'm using, but it 
   might be.
-  Implemented some kind of early prediction to stop the heating a bit earlier, so the overshoot is less.
+
+  Version 5.4.2
+  Implemented some kind of early prediction for the preheat and reflow modes to stop the heating a bit earlier, 
+  so the overshoot is less.
   Used a boost mode for the first 30 seconds of the reflow phase to get the temperature up faster, because the profile
+
+  Version 5.4.3
   starts at zero degrees, while the actual temperature is room temperature. Otherwise we already start behind the curve.
   Cleaned-up the old code and revisited or added to the comments and the code layout.
+  Repositioned the cooling temp and time fields to below the curve so with higher paste profiles they don't overlap.
 
   
 
@@ -419,8 +425,11 @@ ReflowPhase currentPhase = PREHEAT; //Default phase
 // When the heater is on it is ramping up the temperature. We need to turn the heater off before it 
 // reaches the target temperature to avoid overshoot due to the inertia of the hardware.
 int preheatCutOff = 0; // the temperature where we want to cut off the heater in the preheat phase
+int const preheatCutOffTime = 15; // cut off the heater 15s before the target temperature
 int reflowCutOff = 0; // the temperature where we want to cut off the heater in the reflow phase
-// These values are based on the selected solderpaste and will be defined in setup() or when a 
+int const reflowCutOffTime = 15; // cut off the heater 15s before the target temperature
+
+// The actual cutoff times are based on the selected solderpaste and will be defined in setup() or when a 
 // new solderpaste is selected.
 
 
@@ -484,8 +493,8 @@ void setup()
   
   //-----
   // forward prediction for the heating cut-off in the preheat and reflow phases
-  preheatCutOff = preheatTime - 15; // cut off the heater 10 seconds before the target temperature
-  reflowCutOff = reflowTime - 15; // cut off the heater 10 seconds before the target temperature
+  preheatCutOff = preheatTime - preheatCutOffTime; // cut off the heater before the target temperature
+  reflowCutOff = reflowTime - reflowCutOffTime; // cut off the heater before the target temperature
 
   //-----
   Serial.println("welcome screen on tft");
@@ -1603,8 +1612,8 @@ void processRotaryButton()
           prev_solderPasteSelected = solderPasteSelected;
 
           // forward prediction for the heating cut-off in the preheat and reflow phases
-          preheatCutOff = preheatTime - 15; // cut off the heater 10 seconds before the target temperature
-          reflowCutOff = reflowTime - 15; // cut off the heater 10 seconds before the target temperature
+          preheatCutOff = preheatTime - preheatCutOffTime; // cut off the heater 10 seconds before the target temperature
+          reflowCutOff = reflowTime - reflowCutOffTime; // cut off the heater 10 seconds before the target temperature
         }
       // ending edit mode
       tft.fillRoundRect(48, 0, 150, 18, RectRadius, YELLOW); //X,Y, W,H, Color
