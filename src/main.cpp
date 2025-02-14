@@ -963,11 +963,11 @@ void drawReflowCurve()
     tft.print("s");
 		//--
 		//Reflow-holding (cooling)
-		tft.setCursor(coolingTime_px+15, coolingTemp_px - 25);
+		tft.setCursor(coolingTime_px + 20, coolingTemp_px + 30);
 		tft.setTextColor(BLUE);
 		tft.print(coolingTemp);
     tft.print("C");
-		tft.setCursor(coolingTime_px+15, coolingTemp_px - 15);
+		tft.setCursor(coolingTime_px + 20, coolingTemp_px + 20);
 		tft.setTextColor(WHITE);
 		tft.print(coolingTime);
     tft.print("s");
@@ -1078,8 +1078,8 @@ void removeFieldsFromDisplay()
   tft.fillRoundRect(soakingTime_px - 25, soakingTemp_px - 10, 24, 9,  RectRadius,BLACK);
   tft.fillRoundRect(reflowTime_px - 5, reflowTemp_px + 10, 24, 9, RectRadius, BLACK);
   tft.fillRoundRect(reflowTime_px - 5, reflowTemp_px + 20, 24, 9, RectRadius, BLACK);
-  tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 26, 24, 9, RectRadius, BLACK);
-  tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
+  tft.fillRoundRect(coolingTime_px + 20, coolingTemp_px + 30 , 24, 9, RectRadius, BLACK);
+  tft.fillRoundRect(coolingTime_px + 20, coolingTemp_px + 20, 24, 9, RectRadius, BLACK);
 
   // Also remove the free warmup, cooling and heating buttons and values
   tft.fillRoundRect(220, 0, 100, 15, RectRadius, BLACK); //Warmup
@@ -1304,8 +1304,8 @@ void processRotaryButton()
     {
       editMode = true;
       //Green background
-      tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, GREEN); //highlight
-      tft.setCursor(coolingTime_px+15, coolingTemp_px - 25);
+      tft.fillRoundRect(coolingTime_px + 20, coolingTemp_px + 29, 24, 9, RectRadius, GREEN); //highlight
+      tft.setCursor(coolingTime_px + 20, coolingTemp_px + 30);
       tft.setTextColor(RED);
       tft.print(coolingTemp);
     }
@@ -1318,8 +1318,8 @@ void processRotaryButton()
         prev_coolingTemp = coolingTemp;
       }
       //Ending edit mode
-      tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, YELLOW); //highlight
-      tft.setCursor(coolingTime_px+15, coolingTemp_px - 25);
+      tft.fillRoundRect(coolingTime_px + 20, coolingTemp_px + 29, 24, 9, RectRadius, YELLOW); //highlight
+      tft.setCursor(coolingTime_px + 20, coolingTemp_px + 30);
       tft.setTextColor(BLUE);
       tft.print(coolingTemp);
       tft.print("C");
@@ -1335,8 +1335,8 @@ void processRotaryButton()
     {
       editMode = true;
       //Green background
-      tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, GREEN); //highlight
-      tft.setCursor(coolingTime_px+15, coolingTemp_px - 15);
+      tft.fillRoundRect(coolingTime_px + 20, coolingTemp_px + 19, 24, 9, RectRadius, GREEN); //highlight
+      tft.setCursor(coolingTime_px + 20, coolingTemp_px + 20);
       tft.setTextColor(RED);
       tft.print(coolingTime);
     }
@@ -1349,8 +1349,8 @@ void processRotaryButton()
         prev_coolingTime = coolingTime;
       }
       //Ending edit mode
-      tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, YELLOW); //highlight
-      tft.setCursor(coolingTime_px+15, coolingTemp_px - 15);
+      tft.fillRoundRect(coolingTime_px +20, coolingTemp_px +19, 24, 9, RectRadius, YELLOW); //highlight
+      tft.setCursor(coolingTime_px +20, coolingTemp_px +20);
       tft.setTextColor(RED);
       tft.print(coolingTime);
       tft.print("s");
@@ -1710,11 +1710,11 @@ void updateHighlighting()
 		case 6: // Cooling temp
       if (editMode)
       {
-        tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, GREEN); //highlight edit mode
+        tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 29, 24, 9, RectRadius, GREEN); //highlight edit mode
       }else{
-        tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, YELLOW); //highlight
+        tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 29, 24, 9, RectRadius, YELLOW); //highlight
       }
-			tft.setCursor(coolingTime_px+15, coolingTemp_px - 25);
+			tft.setCursor(coolingTime_px +20, coolingTemp_px + 30);
 			tft.setTextColor(BLUE);
 			tft.print(coolingTemp);
 			break;
@@ -1722,11 +1722,11 @@ void updateHighlighting()
 		case 7: // Cooling time
       if (editMode)
       {
-			  tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, GREEN); //highlight edit mode
+			  tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 19, 24, 9, RectRadius, GREEN); //highlight edit mode
       }else{
-			  tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, YELLOW); //highlight
+			  tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 19, 24, 9, RectRadius, YELLOW); //highlight
       }
-			tft.setCursor(coolingTime_px+15, coolingTemp_px - 15);
+			tft.setCursor(coolingTime_px +20, coolingTemp_px + 20);
 			tft.setTextColor(RED);
 			tft.print(coolingTime);
 			break;
@@ -1869,15 +1869,15 @@ void updateHighlighting()
       tft.print("s");
 			break;
 		case 6: // cooling temp
-			tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 26, 24, 9, RectRadius, BLACK);
-			tft.setCursor(coolingTime_px+15, coolingTemp_px - 25);
+			tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 29, 24, 9, RectRadius, BLACK);
+			tft.setCursor(coolingTime_px +20, coolingTemp_px + 30);
 			tft.setTextColor(BLUE);
 			tft.print(coolingTemp);
       tft.print("C");
 			break;
 		case 7: // cooling time
-			tft.fillRoundRect(coolingTime_px+15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
-			tft.setCursor(coolingTime_px+15, coolingTemp_px - 16);
+			tft.fillRoundRect(coolingTime_px +20, coolingTemp_px + 19, 24, 9, RectRadius, BLACK);
+			tft.setCursor(coolingTime_px +20, coolingTemp_px + 20);
 			tft.setTextColor(WHITE);
 			tft.print(coolingTime);
       tft.print("s");
@@ -2128,11 +2128,6 @@ void freeHeating()
 				tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
 				tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); //putting another pixel next (on Y) the original, "fake a thick line"
 
-        //targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20)); //20! - this is important because it is also the zero of the axis
-        //Example: 20 + (0 * (1/90) * (90-20)) = 20 + 0 = 20
-        // 2s later: 20 + (2 * (1/90) * (90-20)) = 20 + 1.56 = 21.6
-        // 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
-        //...
         targetTemp = freeHeatingTemp;
         updateStatus(RED, WHITE, "Heating");
         printTargetTemperature(); //Print the target temperature that we calculated above
