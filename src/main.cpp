@@ -90,11 +90,14 @@ const String FW_VERSION = "V5.0.3";
   Changed the drawActionButtons() code so it can handle a single line status message and set the text color and the background
   
   Version 5.4.0
-  Switched back to using an on/off control for the heaters. The PID method does not give the results we want.
-  I'm after, for this application. The PID controller is too slow and the overshoot is too large.
+  Switched back to using an on/off control for the heaters. The PID method does not give any benefits and the PID controller 
+  is too slow and the overshoot especially at the end of the reflow phase is too large.
   The on-off method is much better, but there is still a lot of overshoot after the reflow phase, with the temperature
-  going up to 250°C and then dropping back to 200°C. This is not a problem for the solder paste I'm using, but it 
+  going up to 250°C and then dropping back to 200°C. This may not a problem for the solder paste I'm using, but it 
   might be.
+  Implemented some kind of early prediction to stop the heating a bit earlier, so the overshoot is less.
+  Used a boost mode for the first 30 seconds of the reflow phase to get the temperature up faster, because the profile
+  starts at zero degrees, while the actual temperature is room temperature. Otherwise we already start behind the curve
 
   
 
@@ -115,7 +118,6 @@ const String FW_VERSION = "V5.0.3";
 #include <ezButton.h> // for the rotary button press
 #include "MAX6675.h"
 #include <math.h>  // for the round() function
-#include <PID_v1.h>
 
 #define DSO_TRIG 4      // optional: to trace real-time activity on a scope
 
@@ -162,10 +164,20 @@ MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
 // Constructor for the TFT screen
 // using hardware SPI
 TFT_eSPI tft = TFT_eSPI();
-const int tftX = 320;
-const int tftY = 240;
+const int tftX = 320; // the width of the TFT
+const int tftY = 240; // the height of the TFT
 const int yGraph = tftY-13; // the bottom of the graph
 const int xGraph = 18;      // the left side of the graph
+
+//Graph characteristics for the 240x320 TFT
+//graph area is 18px from the right and 15px from the bottom, we leave 2px free from the right and 60 from the top
+//width: (320)  x: [18-318] -> 300px
+//height: (240) y: [15-237] -> 222px
+//temperature range: 0°C to 250°C
+//time range: 0 s to 330 s -> 330 s (5 1/2min)
+//The coordinate system of the display has inverted Y-axis.
+// Default small font is 6px wide and 8px tall
+// font 2 size is 7px wide and 10px tall
 
 #define BLACK TFT_BLACK
 #define WHITE TFT_WHITE
@@ -210,6 +222,7 @@ const int xGraph = 18;      // the left side of the graph
 // #define TFT_VIOLET      0x915C      /* 180,  46, 226 */
 
 #define OFF 0
+#define ON  255 // for the analogWrite() function, 1 when using the digitalWrite()
 
 //Rotary encoder related
 int selectedItem = 1; //item number for the active menu item (was 0)
@@ -238,14 +251,6 @@ unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
 double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
-
-// -- PID controller
-// Define PID parameters
-double Setpoint, Input, Output;
-double Kp = 5.0, Ki = 50.0, Kd = 1.0; // original 2.0, 5.0, 1.0
-
-// Create the PID controller object
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -325,7 +330,7 @@ int prev_solderPasteSelected = 0; // previous selected solder paste index to avo
 int numSolderpastes = 0; // the number of solderpastes in the array, will be set dynamically based on the size of the array
 
 
-// Remember the original value during the editing mode. Used to eliminate
+// Remember the original value during the editing mode. This is used to eliminate
 // a screen redraw when nothing is changed.
 volatile int prev_soakingTemp = soakingTemp;
 volatile int prev_preheatTemp = preheatTemp;
@@ -347,16 +352,16 @@ volatile int warmupTemp = 38;   // Free heating warm-up default target temperatu
 
 //Conversion formulas for converting the physical values (Temp and time) into pixel values.
 // Display is (YxX) 240x320px
-// 250 degrees max
-// px range is 13 from bottom and 80 from top
+// Y-Axis has 250 degrees max
+// px range is 13 from bottom and 60 from top
 double tempPixelFactor = 250.0 / (tftY - (60+13)); // y = 250 / 167 = 1.497 ~ 1.5°C per pixel on Y
-//-10: Axis is shifted by 18 from the bottom. 
+// X-Axis is shifted by 18 from the bottom. 
 // 360 seconds max
 // px range is 18 from left and 2 from the right (320-2)
 double timePixelFactor = 360.0 / (tftX - (18+2)); // x = 360 / 300 = 1.2s per pixel on X
-//-18: Axis is shifted by 18 from the left and ends 2 pixels before the end of the screen: Available area for plotting: 320-(20) = 300 px.
+// Axis is shifted by 18 from the left and ends 2 pixels before the end of the screen: Available area for plotting: 320-(20) = 300 px.
 
-//Pixel conversions - converts the physical values (t, T) into pixel values for plotting the chart
+//Pixel conversions - converts the physical values (time, temp) into pixel values for plotting the chart
 int preheatTemp_px;
 int preheatTime_px;
 int soakingTemp_px;
@@ -374,6 +379,7 @@ volatile int previousItemCounter = 0; //this tells the code the previous menu po
 bool menuChanged = false; //it tells if the a new menu item should be drawn
 bool menuSelected = false; //it tells if the user entered a menu (selected an item)
 bool editMode = false; // Used to avoid the updateHighlighting when in the edit mode
+
 //Selection of the fields by the rotation of the encoder
 bool solderpasteFieldSelected = false;
 bool preheatTempSelected = false;
@@ -397,7 +403,7 @@ bool freeCoolingOnOffSelected = false;
 bool redrawCurve = true; //tells the code if the reflow curve has to be redrawn
 int RectRadius = 2; // The radius for the rounding of the menu fields
 
-
+// the reflow phases
 enum ReflowPhase
 {
 	PREHEAT = 0,
@@ -408,15 +414,15 @@ enum ReflowPhase
 };
 ReflowPhase currentPhase = PREHEAT; //Default phase
 
-//Graph characteristics for the 240x320 TFT
-// graph is 18px from the right and 15px from the bottom, we leave 3px free from the top and the right
-//width: (320)  x: [18-317] -> 299px
-//height: (240) y: [15-237] -> 222px
-//temperature range: 20°C to 250°C -> 230°C
-//time range: 0 s to 330 s -> 330 s (5 1/2min)
-//The coordinate system of the display has inverted Y-axis.
-// Default small font is 6px wide and 8px tall
-// font 2 size is 7px wide and 10px tall
+// forward looking prediction for the heating cut-off in the preheat and reflow phases
+// when the heater is on, ramping up the temperature. We need to turn the heater off before it 
+// reaches the target temperature to avoid overshoot due to the inertia of the hardware.
+int preheatCutOff = 0; // the temperature where we want to cut off the heater in the preheat phase
+int reflowCutOff = 0; // the temperature where we want to cut off the heater in the reflow phase
+// These values will be defined in the setup code after the solderpaste has been selected.
+
+
+
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void setup()
@@ -458,13 +464,6 @@ void setup()
   thermoCouple.begin();
   thermoCouple.setSPIspeed(40000000);
 
-  //-----
-  Serial.println("setting up PID");
-  // Initialize the PID controller
-  Setpoint = 0; // Initial target temperature
-  myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, 255); // Assuming the output range is 0-255 for PWM control
-
   //----- set the initial solderpaste values
   numSolderpastes = sizeof(solderpastes) / sizeof(solderpaste); // the size of the array of solderpastes
   
@@ -481,6 +480,11 @@ void setup()
   coolingTemp = current.coolingTemp;
   coolingTime = current.coolingTime;
   
+  //-----
+  // forward prediction for the heating cut-off in the preheat and reflow phases
+  preheatCutOff = preheatTime - 15; // cut off the heater 10 seconds before the target temperature
+  reflowCutOff = reflowTime - 15; // cut off the heater 10 seconds before the target temperature
+
   //-----
   Serial.println("welcome screen on tft");
 
@@ -866,14 +870,12 @@ void drawFreeCurve()
 
   // first update the hotplate temperature reading
   tft.fillRoundRect(4, 10, 156, 115, RectRadius, BLACK); //Erase previous content
-  tft.fillScreen(BLACK); //Repaint with black - will cause a blink and make the thermometer disappear for 1 s
+  tft.fillScreen(BLACK); //Repaint with black 
   //-------------------------------------
   //Axis pixel offset = 3
 
-  // Print the name of the paste
-  //tft.setCursor(pasteNamePosX, pasteNamePosY);
+  // Print the name of the default paste
   tft.setTextColor(WHITE);
-  //tft.print(pasteName);
   tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
 
   drawAxis();
@@ -898,18 +900,17 @@ void drawReflowCurve()
 	{
     // first update the hotplate temperature reading
 		tft.fillRoundRect(4, 10, 156, 115, RectRadius, BLACK); //Erase previous content
-		tft.fillScreen(BLACK); //Repaint with black - will cause a blink and make the thermometer disappear for 1 s
+		tft.fillScreen(BLACK); //Repaint with black 
 		//-------------------------------------
 		//Axis pixel offset = 3
 
     // Print the name of the paste
-    //tft.setCursor(pasteNamePosX, pasteNamePosY);
 		tft.setTextColor(WHITE);
-		//tft.print(pasteName);
     tft.drawString(pasteName,pasteNamePosX,pasteNamePosY,2);
 
 		//Calculate the portions of the curve to be plotted
-		//Temperature values converted into pixel values - values are casted into integers (rounding errors can occur: +/-2°C and +/-2s error)
+		//Temperature and time values converted into pixel values
+    //values are casted into integers (rounding errors can occur: (0.5 is rounded down to 0)
     preheatTemp_px = (int)(yGraph - (double)preheatTemp / tempPixelFactor);
 		preheatTime_px = (int)(xGraph + (double)preheatTime / timePixelFactor);
 		//--
@@ -922,17 +923,15 @@ void drawReflowCurve()
     coolingTemp_px = (int)(yGraph - (double)coolingTemp / tempPixelFactor);
 		coolingTime_px = (int)(xGraph + (double)coolingTime / timePixelFactor);
 
-		//Draw reflow curve
+		//Draw the reflow curve
 		drawCurve();
 
 		//Draw the values of the portions of the curve
 		//Preheat
-		//tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
     tft.setCursor(preheatTime_px - 10, preheatTemp_px - 30);
 		tft.setTextColor(RED);
 		tft.print(preheatTemp);
     tft.print("C");
-		//tft.setCursor(preheatTime_px - 25, preheatTemp_px - 10);
     tft.setCursor(preheatTime_px - 10, preheatTemp_px - 20);
 		tft.setTextColor(WHITE);
 		tft.print(preheatTime);
@@ -1017,7 +1016,6 @@ void drawActionButtons(){
 
 /*
  Obtain the hot plate temperature using a thermocouple and the MAX6675
-
 */
 void measureTemperature()
 {
@@ -1032,11 +1030,7 @@ void measureTemperature()
     // }
 
     TCCelsius = thermoCouple.getTemperature();
-    if (TCCelsius > 1000)
-    {
-      // sensor is probably not connected, are we testing?
-      TCCelsius = 150; // so we can test the phases
-    }
+
 		// Serial.print("Temp: ");
 		// Serial.println(TCCelsius); //print converted data on the serial terminal
 
@@ -1059,8 +1053,9 @@ void measureTemperature()
 
 
 /*
-  Remove all the fields from the initial setup display when we go to reflow, free heating or free cooling
-
+  Remove all the temp and time fields from the initial setup display 
+  when we go to reflow, free heating or free cooling.
+  Also remove the action buttons
 */
 void removeFieldsFromDisplay()
 {
@@ -1076,15 +1071,15 @@ void removeFieldsFromDisplay()
   tft.fillRoundRect(coolingTime_px + 15, coolingTemp_px - 16, 24, 9, RectRadius, BLACK);
 
   // Also remove the free warmup, cooling and heating buttons and values
-  tft.fillRoundRect(220, 0, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
-  tft.fillRoundRect(220, 40, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
-  tft.fillRoundRect(220, 60, 100, 15, RectRadius, BLACK); //X,Y, W,H, Color
+  tft.fillRoundRect(220, 0, 100, 15, RectRadius, BLACK); //Warmup
+  tft.fillRoundRect(220, 40, 100, 15, RectRadius, BLACK); //Free Heating
+  tft.fillRoundRect(220, 60, 100, 15, RectRadius, BLACK); //Free cooling
 
 }
 
 
 /*
-  The rotary button has been pressed so we enter the processing of the menu and values
+  The rotary button has been pressed on a field so we enter the processing of the menu and values
 
   Unfortunately, the way the code was written, with many tft activities, 
   you can't turn this into an ISR, so we have to poll the activity in the main loop
@@ -1092,20 +1087,12 @@ void removeFieldsFromDisplay()
   A press of the button enters the edit mode for the contend of the field it is on.
   The fields are selected by turning the rotary encoder itself. The selected field background it turned yellow.
   When you enter the edit mode for the field, the background of the field changes from yellow to green.
-  The rotary encoder is used to select a new value.
+  The rotary encoder turning is used to select a new value.
   
   Another press of the button ends the edit mode and the complete graph is redrawn based on the new value.
-  The last field on the normal display is the Start/Stop field. Pressing the button toggles between them.
-  Going beyond the Start-Stop field will enter the optional "free" setting mode.
-  In this mode, you can select the temperature and the Heating and Cooling fields.
-  Entering edit in the temperature field allows you to set any temperature, selecting the 
-  Heating and Cooling fields will turn them on or off with the button.
-
-  Todo:
-  Previously, leaving the edit mode would not highlight the background of the field you're on in
-  yellow anymore. There is no background. The redraw function erases the field. - Fixed
-  Not changing a value will still redraw the complete graph. - Fixed
-  The button action is not very reliable, so I now use a library
+  The special fields are the solder paste selection, and the "buttons" for Warmup, Reflow, Heating and cooling.
+  Pressing a button activates the mode. Rotating the encoder will go through all the fields in the menu, and 
+  returns to the first element after the last one. You can rotate both ways.
 
 */
 void processRotaryButton()
@@ -1121,9 +1108,7 @@ void processRotaryButton()
       //Edit mode: Green background, red number
       editMode = true;
       tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 20, 9, RectRadius, GREEN); //highlight
-      //tft.setCursor(preheatTime_px - 25, preheatTemp_px - 20);
-      tft.setTextColor(RED);
-      //tft.print(preheatTemp);     
+      tft.setTextColor(RED);  
       tft.drawString(String(preheatTemp),preheatTime_px - 10, preheatTemp_px - 30, 1);
 
     }
@@ -1362,7 +1347,7 @@ void processRotaryButton()
     }
     break;
   //================================================================================================
-  // process the warmup, free heating and cooling fields
+  // process the warmup, free heating, cooling and solderpaste "button" fields
   //================================================================================================
   case 8:  //--Warmup temperature
     warmupTempSelected = !warmupTempSelected;
@@ -2056,11 +2041,21 @@ void runReflow_old()
 
 
 /*
-When you simulate the reflow mode
+Run the reflow mode
+The reflow process moves from one phase to the next based on an actual measurement
+of where we are in time, and at what temperature we are at.
+The calculation of the target temperature is based on the elapsed time and the temperature
+we want to reach at the end of each phase.
+This calculation follows the initial reflow curve but does not follow the exact curve.
+The temperature is regulated by the controlSSR function.
 
-Activate:
- TCCelsius = targetTemp;
- elapsedHeatingTime to 100.0 (10x) faster at the end of the function
+When you want to simulate the reflow mode and see the calculation of the target temperature over time,
+you can simulate the process. This also allows you to test the transitions from one phase to the next
+without actually using the heaters.
+
+To activate the simulation, uncomment the line:
+ TCCelsius = targetTemp; // this links the TCCelsius to the calculated targetTemp and not the actual sensor
+ Set elapsedHeatingTime at the end of the function to 100.0 to run the simulation 10x faster .
 
 */
 
@@ -2075,38 +2070,58 @@ void runReflow()
             if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
             {
                 // *** Simulate the temperature value in TCCelsius
-                //TCCelsius = targetTemp; // To simulate, set the temperature to the target temperature
+                //TCCelsius = targetTemp; // To simulate, link the calculated temperature to the target temperature
 
-                // Draw a pixel for the temperature measurement - Calculate the position
+                // Calculate the x-y coordinate of a pixel to show the temperature measurement over time
                 measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
                 measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
+
+                // Draw the pixel (time vs. temperature) on the graph
+                tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
+                // you can draw a thicker line by activating the next statement
+                // by putting another pixel next (on Y) the original, to fake "a thicker line"
+                //tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); 
 
                 // Print the elapsed time in seconds
                 printElapsedTime();
 
-                // Draw the pixel (time vs. temperature) on the graph
-                tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-                // can draw a thicker line by activating the next statement
-                //tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
-
                 switch (currentPhase) // This part determines the code's progress along the reflow curve
                 {
                 case PREHEAT:
-                    // calculate the desired temperature based on the elapsed time
+                    // calculate the desired temperature from the reflow profile, based on the elapsed time, 
+                    // and thus trying to follow the reflow curve in real-time
                     targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
+                    
+                    // show the phase on the display
                     updateStatus(DGREEN, WHITE, "Preheat");
+                    // print the target temperature on the display
                     printTargetTemperature();
                     
-
-                    // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
-                    if ((elapsedHeatingTime < preheatTime * 0.8) && (TCCelsius <= targetTemp)) 
+                    // initially, the reflow curve starts at o degrees, while the actual temperature is
+                    // room temperature. To speed up the process, we can boost the temperature for the first
+                    // 40 seconds to speed up the process.
+                    if (elapsedHeatingTime < 40)
                     {
-                      analogWrite(SSR_pin, 255); // Full power
-                      //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
+                        analogWrite(SSR_pin, ON); // Full power
+                        tft.fillRoundRect(120, 60, 80, 16, RectRadius, RED);
+                        tft.setTextColor(WHITE);
+                        tft.drawString("BOOST", 122, 60, 2);
                     } else {
-                      controlSSR(TCCelsius, TCCelsius, timeNow, SSRInterval); // do nothing, keep the temperature
-                    } 
 
+                      // Do some kind of early turn-off to avoid temperature overshooting
+                      // if we are almost there and close to the targetTemp, we can stop heating
+                      // We start to see if we can stop heating a little while before we reach the end of the time,
+                      // and check to see if we are within a certain range of the target temperature.
+                      // we should be above the target temperature and not too far below it.
+                      // Note that the target temperature changes every cycle, so we have to check it every time.
+                      if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
+                      {
+                        //analogWrite(SSR_pin, OFF); // Switch off power
+                        controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // This will stop the heating
+                      } else {
+                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // normal operation
+                      } 
+                    }
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
                     {
@@ -2115,6 +2130,7 @@ void runReflow()
                     break;
 
                 case SOAK:
+                    // calculate the desired temperature from the reflow profile, based on the elapsed time and the temp from the profile
                     targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Soaking");
@@ -2127,6 +2143,7 @@ void runReflow()
                     break;
 
                 case REFLOW:
+                    // calculate the desired temperature from the reflow profile, based on the elapsed time and the temp from the profile
                     targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
@@ -2134,24 +2151,25 @@ void runReflow()
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
                     
                     // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
-                    if ((elapsedHeatingTime < reflowTime * 0.95) && (TCCelsius <= targetTemp)) // stop heating at 90% of the soaking time
+                    if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
                     {
-                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
+                      //analogWrite(SSR_pin, OFF); // Switch off power
+                      controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // This will stop the heating
                     } else {
-                      controlSSR(TCCelsius, TCCelsius, timeNow, SSRInterval); // do nothing, keep the temperature
+                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // normal operation
                     } 
 
                     if (TCCelsius > reflowTemp || elapsedHeatingTime > reflowTime)
-                    // when we have reached the reflowTemp, we can move to the hold phase
+                    // when we have reached the reflowTemp or past the time, we can move to the hold phase
                     {
                       currentPhase = HOLD;
                     }
                     break;
 
                 case HOLD:
+                    // calculate the desired temperature from the reflow profile, based on the elapsed time and the temp from the profile
                     targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp);
-                    //targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
-                    targetTemp = reflowTemp; // keep the temperature at the reflow temperature
+                    //targetTemp = reflowTemp; // keep the temperature at the reflow temperature
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Holding");
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
@@ -2165,8 +2183,9 @@ void runReflow()
                     break;
 
                 case COOLING:
+                    // turn on the fans and allow them to cool down to 40 degrees
                     targetTemp = 40;
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // this will actually stop the heating
                     updateStatus(DGREEN, WHITE, "Cooling");
                     heatingEnabled = false; // Disable heating
                     //analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
@@ -2458,30 +2477,6 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 }
 
 
-void controlSSR_PID(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
-{	
-  // Check if the heating is enabled 
-  if (heatingEnabled == true)
-  {
-    // Use the PID to control the heating elements
-    Input = TCCelsius;
-    Setpoint = targetTemp; // Set the target temperature based on the current phase
-    myPID.Compute(); //PID calculation
-    analogWrite(SSR_pin, int(Output));
-    // show the PWM output on the screen
-    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-    tft.setTextColor(WHITE);
-    tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
-  } else {
-    // stop heating
-    analogWrite(SSR_pin, OFF); // Turn off the heating elements
-    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-    tft.setTextColor(WHITE);
-    tft.drawString("PID OFF", 122, 60, 2);
-  }
-
-}
-
 void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
   // Check if the heating is enabled 
@@ -2489,19 +2484,17 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
   {
     if (currentTemp < targetTemp)
     {
-      Output = 255;
-      analogWrite(SSR_pin, Output);
+      analogWrite(SSR_pin, ON);
       // show the PWM output on the screen
       tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
       tft.setTextColor(WHITE);
-      tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+      tft.drawString("SSR ON", 122, 60, 2);
     } else {
       // stop heating
-      Output = OFF;
-      analogWrite(SSR_pin, Output); // Turn off the heating elements
+      analogWrite(SSR_pin, OFF); // Turn off the heating elements
       tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
       tft.setTextColor(WHITE);
-      tft.drawString("PID OFF", 122, 60, 2);
+      tft.drawString("SSR OFF", 122, 60, 2);
     }
   }
 }
