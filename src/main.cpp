@@ -97,7 +97,8 @@ const String FW_VERSION = "V5.0.3";
   might be.
   Implemented some kind of early prediction to stop the heating a bit earlier, so the overshoot is less.
   Used a boost mode for the first 30 seconds of the reflow phase to get the temperature up faster, because the profile
-  starts at zero degrees, while the actual temperature is room temperature. Otherwise we already start behind the curve
+  starts at zero degrees, while the actual temperature is room temperature. Otherwise we already start behind the curve.
+  Cleaned-up the old code and revisited or added to the comments and the code layout.
 
   
 
@@ -414,12 +415,13 @@ enum ReflowPhase
 };
 ReflowPhase currentPhase = PREHEAT; //Default phase
 
-// forward looking prediction for the heating cut-off in the preheat and reflow phases
-// when the heater is on, ramping up the temperature. We need to turn the heater off before it 
+// forward looking prediction for the heating cut-off in the preheat and reflow phases.
+// When the heater is on it is ramping up the temperature. We need to turn the heater off before it 
 // reaches the target temperature to avoid overshoot due to the inertia of the hardware.
 int preheatCutOff = 0; // the temperature where we want to cut off the heater in the preheat phase
 int reflowCutOff = 0; // the temperature where we want to cut off the heater in the reflow phase
-// These values will be defined in the setup code after the solderpaste has been selected.
+// These values are based on the selected solderpaste and will be defined in setup() or when a 
+// new solderpaste is selected.
 
 
 
@@ -512,7 +514,10 @@ void setup()
 }
 
 
-
+/*
+  The main loop of the code
+  Statemachines will activate the functionality of the code
+*/
 void loop()
 {
   button.loop(); // MUST call the ezButton loop() function first
@@ -520,7 +525,6 @@ void loop()
   if (button.isPressed()) processRotaryButton();
   measureTemperature();
 	updateHighlighting();
-	//drawReflowCurve(); //This is now done in the various functions
   runWarmup();
   runReflow();
 	freeHeating();
@@ -531,8 +535,11 @@ void loop()
 /*
   Interrupt Service Routine for the Rotary Encoder
 
+  This is the routine that is used to move from field to field and when the button is clicked,
+  it enters the edit mode in which the information in the field can be changed by rotation.
+
   The interrupt was generated when a change on the RotaryCLK signal was detected.
-  The ISR takes a little and we also have a hardware r/c delay, so by reading it again now, 
+  The ISR takes a little time and we also have a hardware r/c delay, so by reading it again now, 
   we should have a stable level.
 
   Depending on the field we're in, we can adjust the value of temp and time
@@ -540,10 +547,6 @@ void loop()
   The recommended method is to limit the execution time in an ISR to the absolute minimum.
   In this case however, we're not expecting other interrupts, and the actual time spent in the ISR
   is very short, despite the many lines of code.
-
-  Todo:
-  When you're rapidly scrolling forward, going through page 2 back to page 1, the screen does not refresh.
-  That process gets interrupted and does not run the whole way.
 
 */
 void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
@@ -865,6 +868,11 @@ void IRAM_ATTR rotaryEncoderISR() // IRAM_ATTR
   //digitalWrite(DSO_TRIG, LOW); // track duration
 }
 
+/*
+  Function to create the basic graph display on the TFT screen
+  It is used for the warmup, free heating and free cooling functions to
+  plot their curves.
+*/
 void drawFreeCurve()
 {
 
@@ -872,7 +880,6 @@ void drawFreeCurve()
   tft.fillRoundRect(4, 10, 156, 115, RectRadius, BLACK); //Erase previous content
   tft.fillScreen(BLACK); //Repaint with black 
   //-------------------------------------
-  //Axis pixel offset = 3
 
   // Print the name of the default paste
   tft.setTextColor(WHITE);
@@ -886,7 +893,7 @@ void drawFreeCurve()
   Draw the reflow curve on the display
 
   First we redraw the hotplate temperature reading, then we start to draw
-  the graph by first drawing the x-y axis.
+  the graph by first drawing the x-y axis and graticule.
   We then calculate the pixel values for the portions of the graph, after which
   we can actually draw the graph with the colored segments.
   
@@ -901,8 +908,6 @@ void drawReflowCurve()
     // first update the hotplate temperature reading
 		tft.fillRoundRect(4, 10, 156, 115, RectRadius, BLACK); //Erase previous content
 		tft.fillScreen(BLACK); //Repaint with black 
-		//-------------------------------------
-		//Axis pixel offset = 3
 
     // Print the name of the paste
 		tft.setTextColor(WHITE);
@@ -972,9 +977,14 @@ void drawReflowCurve()
 	}
 }
 
+/*
+  Function to draw the action "buttons" on the display for the warmup, reflow, free 
+  heating and free cooling functions. When selecting these fields, the user can
+  either change the initial values, or start the action.
+*/
 void drawActionButtons(){
 
-    // place the pre-warm button
+    // place the warmup button
     tft.fillRoundRect(260, 0, 60, 15, RectRadius, DGREEN); //X,Y, W,H, Color
     tft.setTextColor(WHITE);
     tft.drawString("WARMUP", 265, 0, 2);
@@ -1016,6 +1026,7 @@ void drawActionButtons(){
 
 /*
  Obtain the hot plate temperature using a thermocouple and the MAX6675
+ Do regular readings and update the display every 0.25s (could be slower)
 */
 void measureTemperature()
 {
@@ -1035,7 +1046,7 @@ void measureTemperature()
 		// Serial.println(TCCelsius); //print converted data on the serial terminal
 
     //Update the text on the display whenever a reading is finished
-    if (TCCelsius > 500)
+    if (TCCelsius > 500) // incorrect value, could be a grounding issue
     {
       tft.fillRoundRect(30, 40, 80, 16, RectRadius, RED); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
@@ -1097,7 +1108,7 @@ void removeFieldsFromDisplay()
 */
 void processRotaryButton()
 {
-  switch (itemCounter) //checks the position in the menu
+  switch (itemCounter) // selects the menu item that was selected
   {
   //--Preheat temperature
   case 0:
@@ -1384,7 +1395,7 @@ void processRotaryButton()
     }
     else
     {
-      // First draw all the buttons (easy way out)
+      // First draw all the buttons (the easy way out)
       drawActionButtons();
       // Then update the warmup field so it's still marked as selected so we know where we are
       tft.fillRoundRect(260, 0, 60, 15, RectRadius, YELLOW);
@@ -1412,7 +1423,7 @@ void processRotaryButton()
     if (startStopButtonSelected == true)
     {
       editMode = true;
-      //Remove all the numbers, keep only the curve -> It makes the display cleaner, easier to read
+      //Remove all the numbers -> It makes the display cleaner, easier to read
       removeFieldsFromDisplay();
       drawCurve(); // redraw the curve
 
@@ -1439,7 +1450,7 @@ void processRotaryButton()
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
       digitalWrite(Fan_pin, LOW); // turn the cooling fan off, the user select the free cooling mode if desired
-      tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off signal
+      tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off status field
       // ending edit mode
       editMode = false;
       drawReflowCurve(); // redraw the curve with the values
@@ -1590,6 +1601,10 @@ void processRotaryButton()
 
           drawReflowCurve();
           prev_solderPasteSelected = solderPasteSelected;
+
+          // forward prediction for the heating cut-off in the preheat and reflow phases
+          preheatCutOff = preheatTime - 15; // cut off the heater 10 seconds before the target temperature
+          reflowCutOff = reflowTime - 15; // cut off the heater 10 seconds before the target temperature
         }
       // ending edit mode
       tft.fillRoundRect(48, 0, 150, 18, RectRadius, YELLOW); //X,Y, W,H, Color
@@ -1610,7 +1625,7 @@ void processRotaryButton()
   This function is called from various places in the code.
   Depending on the menu (=field), determined by the rotary encoder, update the information on the display
 
-  Added a check for the edit mode so we keep the proper highlighting
+  Added a check for the edit mode so we keep the proper highlighting when we return from making changes to the values
 */
 void updateHighlighting()
 {
@@ -1914,130 +1929,6 @@ void updateHighlighting()
 	}
 }
 
-void runReflow_old()
-{
-    if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
-    {
-        if (heatingEnabled == true) // If heating was enabled somewhere in the code, we can enter the code below
-        {
-            unsigned long timeNow = millis();
-
-            if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
-            {
-                // Draw a pixel for the temperature measurement - Calculate the position
-                measuredTemp_px = (int)((yGraph) - ((TCCelsius / tempPixelFactor)));
-                measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
-
-                // Also print the elapsed time in seconds
-                printElapsedTime();
-
-                // Draw the pixel (time vs. temperature) on the chart
-                tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-                tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
-
-                switch (currentPhase) // This part determines the code's progress along the reflow curve
-                {
-                case PREHEAT:
-                    targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
-                    updateStatus(DGREEN, WHITE, "Preheat");
-                    printTargetTemperature();
-                    if (elapsedHeatingTime < 40)
-                    {
-                        analogWrite(SSR_pin, 255); // Full power
-                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, RED);
-                        tft.setTextColor(WHITE);
-                        tft.drawString("BOOST", 202, 60, 2);
-                    }
-                    else
-                    {
-                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // Start to regulate
-                        tft.fillRoundRect(200, 60, 80, 16, RectRadius, BLACK);
-                    }
-                    if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
-                    {
-                        currentPhase = SOAK;
-                    }
-                    break;
-
-                case SOAK:
-                    targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) * (1.0 / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp));
-                    printTargetTemperature();
-                    updateStatus(DGREEN, WHITE, "Soaking");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-                    if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime)
-                    {
-                        currentPhase = REFLOW;
-                    }
-                    break;
-
-                case REFLOW:
-                    targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) * (1.0 / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp));
-                    printTargetTemperature();
-                    updateStatus(DGREEN, WHITE, "Reflow");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-                    if (TCCelsius > reflowTemp && elapsedHeatingTime > reflowTime)
-                    {
-                        currentPhase = HOLD;
-                    }
-                    break;
-
-                case HOLD:
-                    targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) * (1.0 / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp));
-                    printTargetTemperature();
-                    updateStatus(DGREEN, WHITE, "Holding");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-                    if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
-                    {
-                        currentPhase = COOLING;
-                    }
-                    break;
-
-                case COOLING:
-                    updateStatus(DGREEN, WHITE, "Cooling");
-                    heatingEnabled = false; // Disable heating
-                    analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
-                    digitalWrite(Fan_pin, HIGH); // Turn on the fan
-                    fanTimer = millis(); // Start fan timer from this period
-                    break;
-                }
-
-                elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
-                SSRTimer = millis();
-            }
-        }
-        else // Heating is NOT enabled (disabled) but we're still in the reflow process (last section of the curve)
-        {
-            if (millis() - SSRTimer > SSRInterval) // Update frequency = 1s - should be less frequent than the temperature readings
-            {
-                if (coolingFanEnabled == true && millis() - fanTimer > 120000) // If fan is enabled and 2 min elapsed
-                {
-                    digitalWrite(Fan_pin, LOW); // Turn off the fan after 2 min
-                    coolingFanEnabled = false; // Set the flag to the corresponding status
-                    reflow = false; // Reflow is finished
-                    tft.fillRoundRect(260, 0, 60, 15, RectRadius, RED);
-                    tft.setTextColor(WHITE);
-                    tft.drawString("REFLOW", 265, 20, 2);
-                    redrawCurve = true; // Simply redraw the whole graph
-                    drawReflowCurve();
-                    heatingEnabled = false; // Stop heating
-                }
-
-                if (coolingFanEnabled == true) // If heating is disabled, but the cooling is enabled, keep drawing the chart
-                {
-                    elapsedHeatingTime += (SSRInterval / 1000.0); // Keep interval ticking
-                    measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
-                    measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
-                    printElapsedTime();
-                    tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-                    tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, fake thick line
-                }
-
-                SSRTimer = millis();
-            }
-        }
-    }
-}
-
 
 
 /*
@@ -2203,7 +2094,7 @@ void runReflow()
 }
 
 
-
+// function to show the elapsed time on the display when one of the modes is active
 void printElapsedTime(){
 
 	tft.fillRoundRect(120, 40, 80, 16, RectRadius, DGREEN); 
@@ -2266,31 +2157,23 @@ void freeCooling()
 
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
-				//Draw a pixel for the temperature measurement - Calculate the position
-				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
+				//Calculate the x-y pixel position for the temperature measurement over time
+				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor)));
         measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
-        Serial.print("measuredTemp_px: "); Serial.println(measuredTemp_px);
-        Serial.print("measuredTime_px: "); Serial.println(measuredTime_px);
+
+        //Draw the pixel (time vs. temperature) on the chart
+				tft.drawPixel(measuredTime_px, measuredTemp_px, BLUE);
+				tft.drawPixel(measuredTime_px, measuredTemp_px + 1, BLUE); 
+        //putting another pixel next (on Y) the original, to fake a "thick line"
+        //tft.drawLine(measuredTime_px, measuredTemp_px, measuredTime_px-50, measuredTime_px+50, WHITE);
 
 				//Also print the elapsed time in second
         printElapsedTime();
 
-				//Draw the pixel (time vs. temperature) on the chart
-				tft.drawPixel(measuredTime_px, measuredTemp_px, BLUE);
-				tft.drawPixel(measuredTime_px, measuredTemp_px + 1, BLUE); //putting another pixel next (on Y) the original, "fake a thick line"
-        //tft.drawLine(measuredTime_px, measuredTemp_px, measuredTime_px-50, measuredTime_px+50, WHITE);
-
-        //targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20)); //20! - this is important because it is also the zero of the axis
-        //Example: 20 + (0 * (1/90) * (90-20)) = 20 + 0 = 20
-        // 2s later: 20 + (2 * (1/90) * (90-20)) = 20 + 1.56 = 21.6
-        // 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
-        //...
         targetTemp = freeCoolingTemp;
         updateStatus(BLUE, WHITE, "Cooling");
         printTargetTemperature(); //Print the target temperature that we calculated above
-        //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-        //analogWrite(SSR_pin, 255);  // heater at full blast 
-        //tft.fillCircle(237, 7, 6, RED);  // show SSR is on 
+
         if (TCCelsius > freeCoolingTemp) //Turn the fans ON or OFF depending on the flag
           {
             digitalWrite(Fan_pin, HIGH);
@@ -2318,26 +2201,23 @@ void runWarmup()
 			if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
 			{
 
-        // Calculate the position of the coordinates so we can plot it on the chart
+        // Calculate the position of the coordinates for the pixel so we can plot it on the chart
 				measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
         measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
-
-				//Also print the elapsed time in second
-        printElapsedTime();
 
 				//Draw the calculated pixel position (time vs. temperature) on the chart
 				tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
 				tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); //putting another pixel next (on Y) the original, "fake a thick line"
 
-        //targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20)); //20! - this is important because it is also the zero of the axis
-        //Example: 20 + (0 * (1/90) * (90-20)) = 20 + 0 = 20
-        // 2s later: 20 + (2 * (1/90) * (90-20)) = 20 + 1.56 = 21.6
-        // 10s later: 20 + (10 * (1/90) * (90-20)) = 20 + 7.78 = 27.8
-        //...
-        targetTemp = warmupTemp;
+        //Also print the elapsed time in second
+        printElapsedTime();
+
         updateStatus(ORANGE, WHITE, "Warmup");
         printTargetTemperature(); //Print the target temperature that we calculated above
-        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+        // heat up to the warmup temperature and keep it there by turning the SSR on or off
+        controlSSR(warmupTemp, TCCelsius, timeNow, SSRInterval);
+
 				elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
 				SSRTimer = millis();
@@ -2410,9 +2290,8 @@ void drawCurve()
   drawAxis();
 
   // Draw the curve
-  // starting center of x-y lines
-
-  tft.drawLine(xGraph, yGraph, preheatTime_px, preheatTemp_px, YELLOW); // start at the 0,0 axis point
+  // starting in the origin of the x-y lines
+  tft.drawLine(xGraph, yGraph, preheatTime_px, preheatTemp_px, YELLOW);
 	tft.drawLine(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
 	tft.drawLine(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
 	tft.drawLine(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
@@ -2422,12 +2301,16 @@ void drawCurve()
 
 // =================================================================================================
 
+// the next three functions are for a different reflow curve based on curved lines
+// the curve is drawn using cosine interpolation between the points
+
 // Function to interpolate between two points using cosine interpolation
 float cosineInterpolate(float y1, float y2, float mu) {
   float mu2 = (1 - cos(mu * PI)) / 2;
   return (y1 * (1 - mu2) + y2 * mu2);
 }
 
+// use the cosimne intrpolation to draw a smooth curve between two points
 void drawSmoothCurve(int x0, int y0, int x1, int y1, uint16_t color) {
   int steps = 100; // Number of interpolation steps
   for (int i = 0; i < steps; i++) {
@@ -2438,12 +2321,12 @@ void drawSmoothCurve(int x0, int y0, int x1, int y1, uint16_t color) {
   }
 }
 
+// This function draws the user-made reflow curve.
+// Since the axes are slightly shifted from the edge of the display, there is a 3px shift for the start of the preheat curve
+// I indicated different sections of the reflow curve by different colors.
+// The cooling time +20 is just an arbitrary value, just to illustrate the cooling part (decreasing temperature) on the reflow curve.
+// It has no physical meaning other than it illustrates the cooling.
 void drawCurve_new() {
-  // This function draws the user-made reflow curve.
-  // Since the axes are slightly shifted from the edge of the display, there is a 3px shift for the start of the preheat curve
-  // I indicated different sections of the reflow curve by different colors.
-  // The cooling time +20 is just an arbitrary value, just to illustrate the cooling part (decreasing temperature) on the reflow curve.
-  // It has no physical meaning other than it illustrates the cooling.
 
   tft.setTextSize(1); // Reset the size to 1 in case the code is coming from someplace else
 
@@ -2460,7 +2343,8 @@ void drawCurve_new() {
 
 //=================================================================================================
 
-void printTargetTemperature() //Momentary target temperature which is derived from the elapsed time
+// Calculated target temperature which is derived from the elapsed time and the reflow curve
+void printTargetTemperature() 
 {
 	tft.fillRoundRect(30, 60, 80, 16, RectRadius, DGREEN); 
   tft.setTextColor(WHITE);
@@ -2468,7 +2352,7 @@ void printTargetTemperature() //Momentary target temperature which is derived fr
 
 }
 
-
+// show and update the status field on the display
 void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 {
   tft.fillRoundRect(160, 190, 70, 18, RectRadius, fieldColor); //Erase the previously printed text
@@ -2476,7 +2360,8 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
   tft.drawString(text, 170, 190, 2);
 }
 
-
+// function to control the SSR (Solid State Relay) to regulate the temperature
+// Also updates the display to show the status of the SSR
 void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
   // Check if the heating is enabled 
