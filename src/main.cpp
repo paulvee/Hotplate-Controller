@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.0.3"; 
+const String FW_VERSION = "V5.4.3"; 
 /*
   Changelog:
   Version V2.0.0:
