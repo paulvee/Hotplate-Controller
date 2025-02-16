@@ -264,9 +264,8 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 // -- PID controller
 // Define PID parameters
 double Setpoint, Input, Output;
-double Kp = 1.0, Ki = 1.0, Kd = 1.0; // conservative values (was 2,5,1)
-double aKp = 4.0, aKi = 5, aKd = 1; // agressive values
-
+double Kp = 2.0, Ki = 50.0, Kd = 1.0;
+//double tempGap = 0; // used to slow the down the heating when we're close to the target
 
 // Create the PID controller object
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, P_ON_M, DIRECT); // use "Proportional on Measurement"
@@ -2166,23 +2165,26 @@ void freeHeating()
 
       targetTemp = freeHeatingTemp;
 
+      /*
       // If we are almost there and just below the targetTemp, 
       // we can use conservative parameters to reduce overshooting
+      
       double gap = abs(targetTemp - TCCelsius);
-      if (gap < 20)
+      if (gap < 30)
       {
-        myPID.SetTunings(Kp, Ki, Kd); // use conservative parameters
+        myPID.SetTunings(aKp, aKi, aKd); // use conservative parameters
 
-        tft.fillRoundRect(150, 100, 40, 20, RectRadius, BLACK);
+        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("conservative", 152, 100, 1);
+        tft.drawString("conservative", 132, 80, 1);
       } else {
         myPID.SetTunings(aKp, aKi, aKd); // use more agressive tuning parameters
 
-        tft.fillRoundRect(150, 100, 40, 20, RectRadius, BLACK);
+        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("agressive", 152, 100, 1);
+        tft.drawString("agressive", 132, 80, 1);
       }
+      */
 
       // use the PID controller to regulate the temperature
       controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
@@ -2262,24 +2264,6 @@ void runWarmup()
       printTargetTemperature() ;
 
       targetTemp = warmupTemp;
-
-      // If we are almost there and just below the targetTemp, 
-      // we can use conservative parameters to reduce overshooting
-      double gap = abs(targetTemp - TCCelsius);
-      if (gap < 15)
-      {
-        myPID.SetTunings(Kp, Ki, Kd); // use conservative parameters
-
-        tft.fillRoundRect(150, 100, 80, 20, RectRadius, BLACK);
-        tft.setTextColor(WHITE);
-        tft.drawString("conservative", 152, 100, 1);
-      } else {
-        myPID.SetTunings(aKp, aKi, aKd); // use more agressive tuning parameters
-
-        tft.fillRoundRect(150, 100, 80, 20, RectRadius, BLACK);
-        tft.setTextColor(WHITE);
-        tft.drawString("agressive", 152, 100, 1);
-      }
 
       // use the PID controller to regulate the temperature
       controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
@@ -2430,6 +2414,9 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 // Also updates the display to show the status of the SSR
 void controlSSR_PID(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
+  static bool regulate = false;
+  static double tempGap; // temperature gap between actual and target
+  
   // Check if the heating is enabled 
   if (heatingEnabled == true)
   {
@@ -2438,7 +2425,22 @@ void controlSSR_PID(double targetTemp, double currentTemp, unsigned long current
     Setpoint = targetTemp; // Set the target temperature based on the current phase
     myPID.Compute(); //PID calculation
 
+    tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
+    tft.setTextColor(WHITE);
+    tft.drawString(String(regulate), 132, 80, 1);
+
+
+    tempGap = int(targetTemp - TCCelsius); // only positive gap
+    if (tempGap < 15 && TCCelsius < targetTemp && regulate == false)
+    {
+      Output = 8; // slow down the temperature ramp-up
+    }
+
+    if (TCCelsius > targetTemp)
+      regulate = true;
+
     analogWrite(SSR_pin, int(Output));
+    
     // show the PWM output on the screen
     tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
     tft.setTextColor(WHITE);
