@@ -264,10 +264,12 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 // -- PID controller
 // Define PID parameters
 double Setpoint, Input, Output;
-double Kp = 5.0, Ki = 50.0, Kd = 1.0; // original 2.0, 5.0, 1.0
+double Kp = 1.0, Ki = 1.0, Kd = 1.0; // conservative values (was 2,5,1)
+double aKp = 4.0, aKi = 5, aKd = 1; // agressive values
+
 
 // Create the PID controller object
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, P_ON_M, DIRECT); // use "Proportional on Measurement"
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -496,7 +498,7 @@ void setup()
     // Initialize the PID controller
     Setpoint = 0; // Initial target temperature
     myPID.SetMode(AUTOMATIC);
-    myPID.SetOutputLimits(0, 255); // The output range is 0-255 for PWM control (8-bit)
+    myPID.SetOutputLimits(0, 255); // PWM control (8-bit)
 
 
   //----- set the initial solderpaste values
@@ -2137,13 +2139,12 @@ void printElapsedTime(){
 }
 
 
-void freeHeating_old()
+void freeHeating()
 {
-  if (enableFreeHeating == true) //If heating was enabled somewhere in the code, we can enter the code below
+  if (enableFreeHeating == true)
   {
     unsigned long timeNow = millis();
-    //heatingEnabled = true; // so we can use controlSSR()
-    static bool heaterOn = false; // Track the state of the heater
+    heatingEnabled = true; // so we can use controlSSR()
 
     if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
     {
@@ -2154,143 +2155,39 @@ void freeHeating_old()
       measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
       measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
-      //Also print the elapsed time in second
+      // Print the elapsed time in seconds
       printElapsedTime();
+      // Print the actual target temperature
+      printTargetTemperature();
 
       //Draw the pixel (time vs. temperature) on the chart
       tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
       tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); //putting another pixel next (on Y) the original, "fake a thick line"
 
       targetTemp = freeHeatingTemp;
-      updateStatus(RED, WHITE, "Heating");
-      printTargetTemperature(); //Print the target temperature that we calculated above
-      
+
       // If we are almost there and just below the targetTemp, 
-      // we can stop heating to avoid overshooting
-      tft.fillRoundRect(150, 80, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - TCCelsius), 152, 80, 1);
-
-      tft.fillRoundRect(150, 90, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - 10), 152, 90, 1);
-
-      if ((int)TCCelsius <= int(targetTemp - 20))
+      // we can use conservative parameters to reduce overshooting
+      double gap = abs(targetTemp - TCCelsius);
+      if (gap < 20)
       {
-        // Normal heating
-        //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-        analogWrite(SSR_pin, ON);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+        myPID.SetTunings(Kp, Ki, Kd); // use conservative parameters
+
+        tft.fillRoundRect(150, 100, 40, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("SSR ON", 122, 60, 2);
-      } 
-      else if (TCCelsius >= targetTemp)
-      {
-        // Stop heating
-        //controlSSR(targetTemp, targetTemp, timeNow, SSRInterval);
-        analogWrite(SSR_pin, OFF);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+        tft.drawString("conservative", 152, 100, 1);
+      } else {
+        myPID.SetTunings(aKp, aKi, aKd); // use more agressive tuning parameters
+
+        tft.fillRoundRect(150, 100, 40, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("SSR OFF", 122, 60, 2);
+        tft.drawString("agressive", 152, 100, 1);
       }
-        
-      //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+
+      // use the PID controller to regulate the temperature
+      controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
+
       elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
-
-      SSRTimer = millis();
-    }
-  }
-}
-
-void freeHeating()
-{
-  if (enableFreeHeating == true) // If warmup was enabled start it
-  {
-    //heatingEnabled = true; // Enable heating mode so we can use the controlSSR function
-
-    unsigned long timeNow = millis();
-
-    if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
-    {
-      // Calculate the position of the coordinates for the pixel so we can plot it on the chart
-      measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
-      measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
-
-      // Draw the calculated pixel position (time vs. temperature) on the chart
-      tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-      tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
-
-      // Also print the elapsed time in second
-      printElapsedTime();
-
-      targetTemp = freeHeatingTemp;
-      updateStatus(RED, WHITE, "Heating");
-      printTargetTemperature(); // Print the target temperature that we calculated above
-
-      tft.fillRoundRect(150, 100, 60, 40, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - TCCelsius), 152, 100, 1);
-      tft.drawString(String(Boost)+" "+String(Pause)+" "+String(Regulate), 152, 110, 1);
-
-      if (Boost == true && Pause == false)
-      {
-        analogWrite(SSR_pin, ON);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("BOOST", 122, 60, 2);
-      }
-
-      // If we are almost there and just below the targetTemp, we can pause the heating to avoid overshooting
-      if ((TCCelsius >= targetTemp - 20) && Boost == true && Pause == false && Regulate == false)
-      {
-        // Pause heating, the temperature will continue to drift up
-        analogWrite(SSR_pin, OFF);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("PAUSE", 122, 60, 2);
-        Pause = true;
-      }
-
-
-      if (TCCelsius < targetTemp && Pause == true && Boost == true && Regulate == false)
-      {
-        // Switch to reduced heating to get to the targetTemp
-        //controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
-        analogWrite(SSR_pin, 32); // reduced heat to 1/8th
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("REDUCE", 122, 60, 2);
-        Boost = false;
-      }
-
-      if (TCCelsius > targetTemp && Pause == true && Boost == false && Regulate == false)
-      {
-        // We have arrived at the targetTemp, switch to normally controlled heating
-        Pause = false;
-        Regulate = true;
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("NORMAL", 122, 60, 2);
-      }
-
-      if (Regulate == true && Pause == false && Boost == false)
-      {
-        if (TCCelsius < targetTemp)// Update the message if the heater is off and the condition is met
-        {
-          //analogWrite(SSR_pin, 8); // use reduced power
-          controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
-          //tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-          //tft.setTextColor(WHITE);
-          //tft.drawString("SSR ON", 122, 60, 2);
-        //} else {
-        //  analogWrite(SSR_pin, OFF);
-        //  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        //  tft.setTextColor(WHITE);
-        //  tft.drawString("SSR OFF", 122, 60, 2);
-        }
-      }
-
-      elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
     }
@@ -2339,93 +2236,13 @@ void freeCooling()
 }
 
 
+
+// Run warmup under PID control
 void runWarmup()
 {
-  static bool heaterOn = false; // Track the state of the heater
-
-  if (enableWarmup == true) // If warmup was enabled start it
+  if (enableWarmup == true)
   {
-    //heatingEnabled = true; // Enable heating mode so we can use the controlSSR function
-
-    unsigned long timeNow = millis();
-
-    if (timeNow - SSRTimer > SSRInterval) // Update frequency = 250 ms - should be less frequent than the temperature readings
-    {
-      // Calculate the position of the coordinates for the pixel so we can plot it on the chart
-      measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
-      measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
-
-      // Draw the calculated pixel position (time vs. temperature) on the chart
-      tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
-      tft.drawPixel(measuredTime_px, measuredTemp_px + 1, CYAN); // Putting another pixel next (on Y) the original, "fake a thick line"
-
-      // Also print the elapsed time in second
-      printElapsedTime();
-
-      targetTemp = warmupTemp;
-      updateStatus(DGREEN, WHITE, "Warmup");
-      printTargetTemperature(); // Print the target temperature that we calculated above
-
-      tft.fillRoundRect(150, 70, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - TCCelsius), 152, 70, 1);
-
-      tft.fillRoundRect(150, 100, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - 10), 152, 100, 1);
-
-      // Do we need to kick-start the process?
-      if ((targetTemp - TCCelsius > 10) && (elapsedHeatingTime < 5))
-      {
-        analogWrite(SSR_pin, 125); // Half power
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, RED);
-        tft.setTextColor(WHITE);
-        tft.drawString("START", 122, 60, 2);
-      }
-
-      // If we are almost there and just below the targetTemp, we can stop heating to avoid overshooting
-      if (TCCelsius <= targetTemp - 10)
-      {
-        // Start heating
-        analogWrite(SSR_pin, ON);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("SSR ON", 122, 60, 2);
-        heaterOn = true;
-      } 
-      else if (TCCelsius >= targetTemp)
-      {
-        // Stop heating
-        analogWrite(SSR_pin, OFF);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("SSR OFF", 122, 60, 2);
-        heaterOn = false;
-      }
-
-      // Update the message if the heater is off and the condition is met
-      if (!heaterOn && TCCelsius > targetTemp - 10)
-      {
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-        tft.setTextColor(WHITE);
-        tft.drawString("SSR OFF", 122, 60, 2);
-      }
-
-      elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
-
-      SSRTimer = millis();
-    }
-  }
-}
-
-
-
-
-void runWarmup_old()
-{
-  if (enableWarmup == true) //If warmup was enabled start it
-  {
-    heatingEnabled = true; // Enable heating mode so we can use the controlSSR function
+    heatingEnabled = true; // Enable heating mode so we can use the controlSSR_PID function
 
     unsigned long timeNow = millis();
 
@@ -2442,50 +2259,30 @@ void runWarmup_old()
 
       //Also print the elapsed time in second
       printElapsedTime();
+      printTargetTemperature() ;
 
       targetTemp = warmupTemp;
-      updateStatus(DGREEN, WHITE, "Warmup");
-      printTargetTemperature(); //Print the target temperature that we calculated above
-
-      tft.fillRoundRect(150, 70, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - TCCelsius), 152, 70, 1);
-
-      tft.fillRoundRect(150, 100, 20, 20, RectRadius, BLACK);
-      tft.setTextColor(WHITE);
-      tft.drawString(String(targetTemp - 10), 152, 100, 1);
-
-
-      // do we need to kick-start the process?
-      if ((targetTemp - TCCelsius - 10) && (elapsedHeatingTime < 5))
-      {
-          analogWrite(SSR_pin, 125); // half power
-          tft.fillRoundRect(120, 60, 80, 16, RectRadius, RED);
-          tft.setTextColor(WHITE);
-          tft.drawString("HALF", 122, 60, 2);
-      }
 
       // If we are almost there and just below the targetTemp, 
-      // we can stop heating to avoid overshooting
-      if (TCCelsius <= (targetTemp - 10))
+      // we can use conservative parameters to reduce overshooting
+      double gap = abs(targetTemp - TCCelsius);
+      if (gap < 15)
       {
-        // Normal heating
-        //controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
-        // Start heating
-        analogWrite(SSR_pin, ON);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+        myPID.SetTunings(Kp, Ki, Kd); // use conservative parameters
+
+        tft.fillRoundRect(150, 100, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("SSR ON", 122, 60, 2);
-      } 
-      else if (TCCelsius >= targetTemp)
-      {
-        // Stop heating
-        //controlSSR(targetTemp, targetTemp, timeNow, SSRInterval);
-        analogWrite(SSR_pin, OFF);
-        tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+        tft.drawString("conservative", 152, 100, 1);
+      } else {
+        myPID.SetTunings(aKp, aKi, aKd); // use more agressive tuning parameters
+
+        tft.fillRoundRect(150, 100, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("SSR OFF", 122, 60, 2);
+        tft.drawString("agressive", 152, 100, 1);
       }
+
+      // use the PID controller to regulate the temperature
+      controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
 
       elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
@@ -2647,7 +2444,7 @@ void controlSSR_PID(double targetTemp, double currentTemp, unsigned long current
     tft.setTextColor(WHITE);
     tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
   } else {
-    // stop heating
+    // if heatingEnabled is false, disable heating
     analogWrite(SSR_pin, OFF); // Turn off the heating elements
     tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
     tft.setTextColor(WHITE);
