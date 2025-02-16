@@ -125,6 +125,7 @@ const String FW_VERSION = "V5.4.3";
 #include <ezButton.h> // for the rotary button press
 #include "MAX6675.h"
 #include <math.h>  // for the round() function
+#include <PID_v1.h> // for the PID controller
 
 #define DSO_TRIG 4      // optional: to trace real-time activity on a scope
 
@@ -154,6 +155,7 @@ void drawCurve();
 void runReflow();
 void printTargetTemperature();
 void printElapsedTime();
+void controlSSR_PID(double, double, unsigned long, unsigned long);
 void controlSSR(double, double, unsigned long, unsigned long);
 void processRotaryButton();
 void measureTemperature();
@@ -258,6 +260,14 @@ unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
 double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
+
+// -- PID controller
+// Define PID parameters
+double Setpoint, Input, Output;
+double Kp = 5.0, Ki = 50.0, Kd = 1.0; // original 2.0, 5.0, 1.0
+
+// Create the PID controller object
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -480,6 +490,14 @@ void setup()
   //-----
   thermoCouple.begin();
   thermoCouple.setSPIspeed(40000000);
+
+    //-----
+    Serial.println("setting up PID");
+    // Initialize the PID controller
+    Setpoint = 0; // Initial target temperature
+    myPID.SetMode(AUTOMATIC);
+    myPID.SetOutputLimits(0, 255); // The output range is 0-255 for PWM control (8-bit)
+
 
   //----- set the initial solderpaste values
   numSolderpastes = sizeof(solderpastes) / sizeof(solderpaste); // the size of the array of solderpastes
@@ -2237,6 +2255,7 @@ void freeHeating()
       if (TCCelsius < targetTemp && Pause == true && Boost == true && Regulate == false)
       {
         // Switch to reduced heating to get to the targetTemp
+        //controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
         analogWrite(SSR_pin, 32); // reduced heat to 1/8th
         tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
         tft.setTextColor(WHITE);
@@ -2258,15 +2277,16 @@ void freeHeating()
       {
         if (TCCelsius < targetTemp)// Update the message if the heater is off and the condition is met
         {
-          analogWrite(SSR_pin, 8); // use reduced power
-          tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-          tft.setTextColor(WHITE);
-          tft.drawString("SSR ON", 122, 60, 2);
-        } else {
-          analogWrite(SSR_pin, OFF);
-          tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-          tft.setTextColor(WHITE);
-          tft.drawString("SSR OFF", 122, 60, 2);
+          //analogWrite(SSR_pin, 8); // use reduced power
+          controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval); // Regulate the temperature
+          //tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+          //tft.setTextColor(WHITE);
+          //tft.drawString("SSR ON", 122, 60, 2);
+        //} else {
+        //  analogWrite(SSR_pin, OFF);
+        //  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+        //  tft.setTextColor(WHITE);
+        //  tft.drawString("SSR OFF", 122, 60, 2);
         }
       }
 
@@ -2609,7 +2629,36 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 }
 
 
+// Function to control the heaters by means of a PID controller
+// Also updates the display to show the status of the SSR
+void controlSSR_PID(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
+{	
+  // Check if the heating is enabled 
+  if (heatingEnabled == true)
+  {
+    // Use the PID to control the heating elements
+    Input = TCCelsius;
+    Setpoint = targetTemp; // Set the target temperature based on the current phase
+    myPID.Compute(); //PID calculation
+
+    analogWrite(SSR_pin, int(Output));
+    // show the PWM output on the screen
+    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+    tft.setTextColor(WHITE);
+    tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+  } else {
+    // stop heating
+    analogWrite(SSR_pin, OFF); // Turn off the heating elements
+    tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+    tft.setTextColor(WHITE);
+    tft.drawString("PID OFF", 122, 60, 2);
+  }
+
+}
+
+
 // function to control the SSR (Solid State Relay) to regulate the temperature
+// by manually setting the PWM value to control the amount of heating.
 // Also updates the display to show the status of the SSR
 void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
 {	
