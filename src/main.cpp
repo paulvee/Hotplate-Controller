@@ -260,15 +260,19 @@ unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
 double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
+double earlyStop; // slow down the heating process just before reaching targetTemp
 
 // -- PID controller
 // Define PID parameters
 double Setpoint, Input, Output;
-double Kp = 2.0, Ki = 50.0, Kd = 1.0;
-//double tempGap = 0; // used to slow the down the heating when we're close to the target
+// p=proportional(gain), i=integral, d=derivative(deadband)
+double Kp = 40.0, Ki = 30.0, Kd = 1.0;
+double cons_Kp = 1.0, cons_Ki = 1.0, cons_Kd = 0.5; // conservative
+
 
 // Create the PID controller object
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, P_ON_M, DIRECT); // use "Proportional on Measurement"
+// start with aggressive parameters
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT); // use error management
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -492,12 +496,12 @@ void setup()
   thermoCouple.begin();
   thermoCouple.setSPIspeed(40000000);
 
-    //-----
-    Serial.println("setting up PID");
-    // Initialize the PID controller
-    Setpoint = 0; // Initial target temperature
-    myPID.SetMode(AUTOMATIC);
-    myPID.SetOutputLimits(0, 255); // PWM control (8-bit)
+  //-----
+  Serial.println("setting up PID");
+  // Initialize the PID controller
+  Setpoint = 0; // Initial target temperature
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(0, 255); // PWM control (8-bit)
 
 
   //----- set the initial solderpaste values
@@ -1085,6 +1089,7 @@ void measureTemperature()
       tft.fillRoundRect(30, 40, 80, 16, RectRadius, RED); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
       tft.drawString("Temp ERROR", 32, 40, 2); // Possibly a grounding error?
+      TCCelsius = 25;
     } else {
       tft.fillRoundRect(30, 40, 80, 16, RectRadius, DGREEN); //X,Y, W,H, Color
       tft.setTextColor(WHITE);
@@ -2016,7 +2021,7 @@ void runReflow()
                     // calculate the desired temperature from the reflow profile, based on the elapsed time, 
                     // and thus trying to follow the reflow curve in real-time
                     targetTemp = 20 + (elapsedHeatingTime * (1.0 / preheatTime) * (preheatTemp - 20));
-                    
+
                     // show the phase on the display
                     updateStatus(DGREEN, WHITE, "Preheat");
                     // print the target temperature on the display
@@ -2072,7 +2077,6 @@ void runReflow()
                     targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
-
                     controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
                     
                     // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
@@ -2144,6 +2148,9 @@ void freeHeating()
   {
     unsigned long timeNow = millis();
     heatingEnabled = true; // so we can use controlSSR()
+    static bool slowdown = false;
+    static bool rampup = true;
+
 
     if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
     {
@@ -2165,29 +2172,51 @@ void freeHeating()
 
       targetTemp = freeHeatingTemp;
 
-      /*
       // If we are almost there and just below the targetTemp, 
       // we can use conservative parameters to reduce overshooting
-      
+      Input = TCCelsius;
+      Setpoint = targetTemp; // Set the target temperature based on the current phase
+      myPID.Compute(); //PID calculation
+
       double gap = abs(targetTemp - TCCelsius);
-      if (gap < 30)
+
+      // when we are regulating but close to the target, but still below it, slow down
+      if (gap < 20 && TCCelsius < freeHeatingTemp && rampup == true)
       {
-        myPID.SetTunings(aKp, aKi, aKd); // use conservative parameters
-
+        //slow down
+        Output = 8;
+        analogWrite(SSR_pin, Output); // let it still creep up
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
-        tft.drawString("conservative", 132, 80, 1);
-      } else {
-        myPID.SetTunings(aKp, aKi, aKd); // use more agressive tuning parameters
-
-        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
-        tft.setTextColor(WHITE);
-        tft.drawString("agressive", 132, 80, 1);
+        tft.drawString("slow down", 132, 80, 1);
+        slowdown = true;
       }
-      */
 
-      // use the PID controller to regulate the temperature
-      controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
+      // if we are now above the target, return to normal regulation
+      if (TCCelsius >= freeHeatingTemp && slowdown == true && rampup == true) 
+      {
+        // back to normal regulation
+        slowdown = false;
+        rampup = false;
+      }
+
+      // normal regulation
+      if (slowdown == false && rampup == false) 
+      {
+        // back to normal control
+        analogWrite(SSR_pin, int(Output));
+        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
+        tft.setTextColor(WHITE);
+        tft.drawString("regulate", 132, 80, 1);
+      }
+
+      
+      // show the PWM output on the screen
+      tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+      tft.setTextColor(WHITE);
+      tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+
+      //controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
 
       elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
@@ -2242,9 +2271,13 @@ void freeCooling()
 // Run warmup under PID control
 void runWarmup()
 {
+  static double earlyStop;
+
   if (enableWarmup == true)
   {
     heatingEnabled = true; // Enable heating mode so we can use the controlSSR_PID function
+    
+    //myPID.SetTunings(cons_Kp, cons_Ki, cons_Kd); // switch to conservative parameters
 
     unsigned long timeNow = millis();
 
@@ -2264,11 +2297,17 @@ void runWarmup()
       printTargetTemperature() ;
 
       targetTemp = warmupTemp;
+      earlyStop = 0; // slow down heating in degrees before targetTemp
 
       // use the PID controller to regulate the temperature
+      Input = TCCelsius;
+      Setpoint = targetTemp; // Set the target temperature based on the current phase
+      myPID.Compute(); //PID calculation
+      analogWrite(SSR_pin, int(Output));
+
       controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
 
-      elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
+      elapsedHeatingTime += (SSRInterval / 5000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
     }
@@ -2392,6 +2431,8 @@ void drawCurve_new() {
 
 //=================================================================================================
 
+
+
 // Calculated target temperature which is derived from the elapsed time and the reflow curve
 void printTargetTemperature() 
 {
@@ -2400,6 +2441,7 @@ void printTargetTemperature()
   tft.drawString("Targt "+String(int(targetTemp))+"`C", 32, 60, 2); // can only print "°C" with font 2
 
 }
+
 
 // show and update the status field on the display
 void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
@@ -2421,26 +2463,17 @@ void controlSSR_PID(double targetTemp, double currentTemp, unsigned long current
   if (heatingEnabled == true)
   {
     // Use the PID to control the heating elements
-    Input = TCCelsius;
-    Setpoint = targetTemp; // Set the target temperature based on the current phase
-    myPID.Compute(); //PID calculation
+    //Input = TCCelsius;
+    //Setpoint = targetTemp; // Set the target temperature based on the current phase
+    //myPID.Compute(); //PID calculation
 
     tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
     tft.setTextColor(WHITE);
     tft.drawString(String(regulate), 132, 80, 1);
 
-
-    tempGap = int(targetTemp - TCCelsius); // only positive gap
-    if (tempGap < 15 && TCCelsius < targetTemp && regulate == false)
-    {
-      Output = 8; // slow down the temperature ramp-up
-    }
-
-    if (TCCelsius > targetTemp)
-      regulate = true;
-
-    analogWrite(SSR_pin, int(Output));
     
+    //analogWrite(SSR_pin, int(Output));
+
     // show the PWM output on the screen
     tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
     tft.setTextColor(WHITE);
@@ -2452,7 +2485,6 @@ void controlSSR_PID(double targetTemp, double currentTemp, unsigned long current
     tft.setTextColor(WHITE);
     tft.drawString("PID OFF", 122, 60, 2);
   }
-
 }
 
 
