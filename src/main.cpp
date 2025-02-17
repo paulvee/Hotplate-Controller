@@ -2026,12 +2026,13 @@ void runReflow()
                     // print the target temperature on the display
                     printTargetTemperature();
                     
-                    // initially, the reflow curve starts at o degrees, while the actual temperature is
+                    // initially, the reflow curve starts at 0 degrees, while the actual temperature is
                     // room temperature. To speed up the process, we can boost the temperature for the first
                     // 40 seconds to speed up the process.
                     if (elapsedHeatingTime < 40)
                     {
-                        analogWrite(SSR_pin, ON); // Full power
+                        Output = 255; // maximum power
+                        analogWrite(SSR_pin, Output); // Full power
                         tft.fillRoundRect(120, 60, 80, 16, RectRadius, RED);
                         tft.setTextColor(WHITE);
                         tft.drawString("BOOST", 122, 60, 2);
@@ -2045,11 +2046,11 @@ void runReflow()
                       // Note that the target temperature changes every cycle, so we have to check it every time.
                       if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
                       {
-                        //analogWrite(SSR_pin, OFF); // Switch off power
-                        controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // This will stop the heating
+                        Output = 0;
                       } else {
-                        controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // normal operation
+                        Output = 255;
                       } 
+                      analogWrite(SSR_pin, Output); // Switch off power
                     }
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
@@ -2063,7 +2064,13 @@ void runReflow()
                     targetTemp = preheatTemp + ((elapsedHeatingTime - preheatTime) / (soakingTime - preheatTime)) * (soakingTemp - preheatTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Soaking");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    if (TCCelsius < targetTemp)
+                    { 
+                      Output = 50; // cut the power
+                    } else {
+                      Output = 0;
+                    }
+                    analogWrite(SSR_pin, Output);
 
                     if (TCCelsius > soakingTemp && elapsedHeatingTime > soakingTime)
                     {
@@ -2076,16 +2083,17 @@ void runReflow()
                     targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // regulate the temperature
+                    Output = 255;
+                    analogWrite(SSR_pin, Output);
                     
                     // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
                     if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
                     {
-                      //analogWrite(SSR_pin, OFF); // Switch off power
-                      controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // This will stop the heating
+                      Output = 0;
                     } else {
-                      controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval); // normal operation
+                      Output = 50; // curb the power
                     } 
+                    analogWrite(SSR_pin, Output);
 
                     if (TCCelsius > reflowTemp || elapsedHeatingTime > reflowTime)
                     // when we have reached the reflowTemp or past the time, we can move to the hold phase
@@ -2100,7 +2108,13 @@ void runReflow()
                     //targetTemp = reflowTemp; // keep the temperature at the reflow temperature
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Holding");
-                    controlSSR(targetTemp, TCCelsius, timeNow, SSRInterval);
+                    if (TCCelsius < targetTemp)
+                    {
+                      Output = 50; // curb the power
+                    } else {
+                      Output = 0;
+                    }
+                    analogWrite(SSR_pin, Output);
 
                     //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
                     // when we have reached the coolingTime limit, we can move to the cooling phase
@@ -2111,12 +2125,13 @@ void runReflow()
                     break;
 
                 case COOLING:
-                    // turn on the fans and allow them to cool down to 40 degrees
+                    // turn of the heater, and turn on the fans and allow them to cool down to 40 degrees
                     targetTemp = 40;
-                    controlSSR(targetTemp, targetTemp, timeNow, SSRInterval); // this will actually stop the heating
+                    Output = 0;
+                    analogWrite(SSR_pin, Output); // stop heating
+                    // start cooling
                     updateStatus(DGREEN, WHITE, "Cooling");
                     heatingEnabled = false; // Disable heating
-                    //analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
                     coolingFanEnabled = true; // Enable cooling
                     digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
                     break;
