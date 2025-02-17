@@ -125,7 +125,7 @@ const String FW_VERSION = "V5.4.3";
 #include <ezButton.h> // for the rotary button press
 #include "MAX6675.h"
 #include <math.h>  // for the round() function
-#include <PID_v1.h> // for the PID controller
+//#include <PID_v1.h> // for the PID controller
 
 #define DSO_TRIG 4      // optional: to trace real-time activity on a scope
 
@@ -155,8 +155,8 @@ void drawCurve();
 void runReflow();
 void printTargetTemperature();
 void printElapsedTime();
-void controlSSR_PID(double, double, unsigned long, unsigned long);
-void controlSSR(double, double, unsigned long, unsigned long);
+//void controlSSR_PID(double, double, unsigned long, unsigned long);
+//void controlSSR(double, double, unsigned long, unsigned long);
 void processRotaryButton();
 void measureTemperature();
 void updateHighlighting();
@@ -260,8 +260,10 @@ unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 double earlyStop; // slow down the heating process just before reaching targetTemp
+double Output; // holds the value for the PWM output to the SSR
 
 // -- PID controller
+/*
 // Define PID parameters
 double Setpoint, Input, Output;
 // p=proportional(gain), i=integral, d=derivative(deadband)
@@ -272,6 +274,7 @@ double cons_Kp = 1.0, cons_Ki = 1.0, cons_Kd = 0.5; // conservative
 // Create the PID controller object
 // start with aggressive parameters
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT); // use error management
+*/
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -496,12 +499,13 @@ void setup()
   thermoCouple.setSPIspeed(40000000);
 
   //-----
+  /*
   Serial.println("setting up PID");
   // Initialize the PID controller
   Setpoint = 0; // Initial target temperature
   myPID.SetMode(AUTOMATIC);
   myPID.SetOutputLimits(0, 255); // PWM control (8-bit)
-
+  */
 
   //----- set the initial solderpaste values
   numSolderpastes = sizeof(solderpastes) / sizeof(solderpaste); // the size of the array of solderpastes
@@ -1487,8 +1491,7 @@ void processRotaryButton()
       reflow = false; //Reset reflow status flag to false (so free heating can run)
       redrawCurve = true; //simply redraw the whole graph
       heatingEnabled = false; //stop heating
-      digitalWrite(Fan_pin, LOW); // turn the cooling fan off, the user select the free cooling mode if desired
-      tft.fillCircle(237, 7, 6, BLACK); // remove the SSR on/off status field
+      digitalWrite(Fan_pin, OFF); // turn the cooling fan off, the user can select the free cooling mode if desired
       // ending edit mode
       editMode = false;
       drawReflowCurve(); // redraw the curve with the values
@@ -2044,13 +2047,13 @@ void runReflow()
                       // and check to see if we are within a certain range of the target temperature.
                       // we should be above the target temperature and not too far below it.
                       // Note that the target temperature changes every cycle, so we have to check it every time.
-                      if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
+                      if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-10)||(TCCelsius >= targetTemp)) 
                       {
                         Output = 0;
                       } else {
                         Output = 255;
                       } 
-                      analogWrite(SSR_pin, Output); // Switch off power
+                      analogWrite(SSR_pin, Output);
                     }
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
@@ -2066,7 +2069,7 @@ void runReflow()
                     updateStatus(DGREEN, WHITE, "Soaking");
                     if (TCCelsius < targetTemp)
                     { 
-                      Output = 50; // cut the power
+                      Output = 150; // cut the power
                     } else {
                       Output = 0;
                     }
@@ -2083,15 +2086,13 @@ void runReflow()
                     targetTemp = soakingTemp + ((elapsedHeatingTime - soakingTime) / (reflowTime - soakingTime)) * (reflowTemp - soakingTemp);
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Reflow");
-                    Output = 255;
-                    analogWrite(SSR_pin, Output);
                     
                     // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
-                    if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-5)||(TCCelsius >= targetTemp)) 
+                    if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-10)||(TCCelsius >= targetTemp)) 
                     {
                       Output = 0;
                     } else {
-                      Output = 50; // curb the power
+                      Output = 255; // max power
                     } 
                     analogWrite(SSR_pin, Output);
 
@@ -2136,6 +2137,11 @@ void runReflow()
                     digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
                     break;
                 }
+                // show the PWM output on the screen
+                tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+                tft.setTextColor(WHITE);
+                tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+
                 // *** set interval to 100.0 (10x faster) when simulating
                 elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
                 SSRTimer = millis();
@@ -2201,12 +2207,12 @@ void freeHeating()
         //slow down based on the targetTemp so we will get there
         if (freeHeatingTemp < 100)
         {
-          Output = 4;
+          Output = 10;
         } else if (freeHeatingTemp < 200)
         {
-          Output = 8;
+          Output = 20;
         } else {
-          Output = 16;
+          Output = 30;
         }
 
         analogWrite(SSR_pin, Output); // let it still creep up
@@ -2245,6 +2251,8 @@ void freeHeating()
       tft.setTextColor(WHITE);
       tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
+      updateStatus(DGREEN, WHITE, "Heating");
+
       elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
@@ -2276,7 +2284,6 @@ void freeCooling()
       printElapsedTime();
 
       targetTemp = freeCoolingTemp;
-      updateStatus(BLUE, WHITE, "Cooling");
       printTargetTemperature(); //Print the target temperature that we calculated above
 
       if (TCCelsius > freeCoolingTemp) //Turn the fans ON or OFF depending on the flag
@@ -2285,6 +2292,8 @@ void freeCooling()
         }else{
           digitalWrite(Fan_pin, LOW);
         }         
+        
+      updateStatus(DGREEN, WHITE, "Cooling");
 
       elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
@@ -2372,6 +2381,8 @@ void runWarmup()
       tft.setTextColor(WHITE);
       tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
+      updateStatus(DGREEN, WHITE, "Warmup");
+
       elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
@@ -2443,8 +2454,8 @@ void drawCurve()
   drawAxis();
 
   // Draw the curve
-  // starting in the origin of the x-y lines
-  tft.drawLine(xGraph, yGraph, preheatTime_px, preheatTemp_px, YELLOW);
+  // starting in the origin of the x line, but at the room temperature (est. @22 degrees) of the y-line
+  tft.drawLine(xGraph, yGraph - (22 / tempPixelFactor), preheatTime_px, preheatTemp_px, YELLOW);
 	tft.drawLine(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
 	tft.drawLine(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
 	tft.drawLine(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
@@ -2517,6 +2528,7 @@ void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text)
 }
 
 
+/*
 // Function to control the heaters by means of a PID controller
 // Also updates the display to show the status of the SSR
 void controlSSR_PID(double targetTemp, double currentTemp, unsigned long currentTime, unsigned long period)
@@ -2577,5 +2589,5 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
     }
   }
 }
-
+*/
 // End of code
