@@ -258,7 +258,6 @@ bool enableFreeCooling = false;
 bool enableWarmup = false;
 unsigned long SSRTimer = 0; //Timer for switching the SSR
 unsigned long SSRInterval = 250; //250ms; update interval for switching the SSR
-double fanTimer = 0; //Time length for the ON period for of the fan - User is encouraged to experiment with this value
 double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 double earlyStop; // slow down the heating process just before reaching targetTemp
 
@@ -2120,7 +2119,6 @@ void runReflow()
                     //analogWrite(SSR_pin, OFF); // Turn off the SSR - heating is OFF
                     coolingFanEnabled = true; // Enable cooling
                     digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
-                    //fanTimer = millis(); // Start fan timer from this period
                     break;
                 }
                 // *** set interval to 100.0 (10x faster) when simulating
@@ -2142,30 +2140,24 @@ void printElapsedTime(){
 }
 
 
+// run the free heating mode
 void freeHeating()
 {
   if (enableFreeHeating == true)
   {
     unsigned long timeNow = millis();
-    heatingEnabled = true; // so we can use controlSSR()
     static bool slowdown = false;
     static bool rampup = true;
-    static int delay = 0; 
 
 
     if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
     {
-      // *** to check the calibration of the Y axis, fix the TCCelsius to a constant value
-      //TCCelsius = 165; // in degrees Celsius
-
       //Draw a pixel for the temperature measurement - Calculate the position
       measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 3
       measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor));
 
-      // Print the elapsed time in seconds
-      printElapsedTime();
-      // Print the actual target temperature
-      printTargetTemperature();
+      printElapsedTime(); // Print the elapsed time in seconds
+      printTargetTemperature(); // Print the actual target temperature
 
       //Draw the pixel (time vs. temperature) on the chart
       tft.drawPixel(measuredTime_px, measuredTemp_px, CYAN);
@@ -2175,15 +2167,13 @@ void freeHeating()
 
       // If we are almost there and just below the targetTemp, 
       // we can use conservative parameters to reduce overshooting
-      Input = TCCelsius;
-      Setpoint = targetTemp; // Set the target temperature based on the current phase
-      myPID.Compute(); //PID calculation
 
       double gap = abs(targetTemp - TCCelsius);
 
       // initial rampup
       if (slowdown == false && rampup == true) 
       {
+        Output = 255;
         analogWrite(SSR_pin, int(Output));
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
@@ -2191,10 +2181,19 @@ void freeHeating()
       }
 
       // when we are ramping up and close to the target, but still below it, slow down
-      if (gap < 20 && TCCelsius < freeHeatingTemp && rampup == true)
+      if (gap < 25 && TCCelsius < freeHeatingTemp && rampup == true)
       {
-        //slow down
-        Output = 8;
+        //slow down based on the targetTemp so we will get there
+        if (freeHeatingTemp < 100)
+        {
+          Output = 4;
+        } else if (freeHeatingTemp < 200)
+        {
+          Output = 8;
+        } else {
+          Output = 16;
+        }
+
         analogWrite(SSR_pin, Output); // let it still creep up
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
@@ -2205,40 +2204,33 @@ void freeHeating()
       // if we are now above the target, return to normal regulation
       if (TCCelsius >= freeHeatingTemp && slowdown == true && rampup == true) 
       {
-        delay++;
-        if (delay > 20)
-        {
-          // back to normal regulation
-          slowdown = false;
-          rampup = false;
-        }
-        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
-        tft.setTextColor(WHITE);
-        tft.drawString("delay : "+String(delay), 132, 80, 1);
+        // back to normal regulation
+        slowdown = false;
+        rampup = false;
       }
 
       // normal regulation
       if (slowdown == false && rampup == false) 
       {
-        // back to normal control
-        // curb the maximum output
-        if (Output > 100)
-          Output = 100;
-        analogWrite(SSR_pin, int(Output));
+        if ( TCCelsius < freeHeatingTemp)
+        {
+          Output = 40; // curb the power to make the regulation smoother
+          analogWrite(SSR_pin, int(Output));
+        } else{
+          Output = 0;
+          analogWrite(SSR_pin, int(Output));
+        }
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
         tft.drawString("regulate", 132, 80, 1);
       }
-
-      
+     
       // show the PWM output on the screen
       tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
       tft.setTextColor(WHITE);
       tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
-      //controlSSR_PID(targetTemp, TCCelsius, timeNow, SSRInterval);
-
-      elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
+      elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
     }
@@ -2288,24 +2280,18 @@ void freeCooling()
 
 
 
-// Run warmup under PID control
+// Run warmup mode
 void runWarmup()
 {
-  static double earlyStop;
+  static bool slowdown = false;
+  static bool rampup = true;
 
   if (enableWarmup == true)
   {
-    heatingEnabled = true; // Enable heating mode so we can use the controlSSR_PID function
-    heatingEnabled = true; // so we can use controlSSR()
-    static bool slowdown = false;
-    static bool rampup = true;
-    static int delay = 0; 
-
     unsigned long timeNow = millis();
 
     if (timeNow - SSRTimer > SSRInterval) //update frequency = 250 ms - should be less frequent than the temperature readings
     {
-
       // Calculate the position of the coordinates for the pixel so we can plot it on the chart
       measuredTemp_px = (int)(yGraph - ((TCCelsius / tempPixelFactor))); // 220 -> 200 offset is 13
       measuredTime_px = (int)(xGraph + (elapsedHeatingTime / timePixelFactor)); // 18px from the left
@@ -2319,19 +2305,12 @@ void runWarmup()
       printTargetTemperature() ;
 
       targetTemp = warmupTemp;
-
-      Input = TCCelsius;
-      Setpoint = targetTemp; // Set the target temperature based on the current phase
-      myPID.Compute(); //PID calculation
-      // curb the output
-      if (Output > 100)
-      Output = 100;
-
-      double gap = abs(targetTemp - TCCelsius);
+      double gap = abs(targetTemp - TCCelsius); // to stop the rampup mode early
 
       // initial rampup
       if (slowdown == false && rampup == true) 
       {
+        Output = 125; // curb the output in this mode to half power
         analogWrite(SSR_pin, int(Output));
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
@@ -2341,8 +2320,8 @@ void runWarmup()
       // when we are ramping up and close to the target, but still below it, slow down
       if (gap < 10 && TCCelsius < warmupTemp && rampup == true)
       {
-        Output = 8; //slow down
-        analogWrite(SSR_pin, Output); // let it still creep up
+        Output = 4; //slow down and let it creep up
+        analogWrite(SSR_pin, Output); 
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
         tft.drawString("slow down", 132, 80, 1);
@@ -2352,35 +2331,33 @@ void runWarmup()
       // if we are now above the target, return to normal regulation
       if (TCCelsius >= warmupTemp && slowdown == true && rampup == true) 
       {
-        delay++;
-        if (delay > 10)
-        {
-          // back to normal regulation
-          slowdown = false;
-          rampup = false;
-        }
-        tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
-        tft.setTextColor(WHITE);
-        tft.drawString("delay : "+String(delay), 132, 80, 1);
+        // back to normal regulation
+        slowdown = false;
+        rampup = false;
       }
 
       // normal regulation
       if (slowdown == false && rampup == false) 
       {
-        // back to normal control
-        analogWrite(SSR_pin, int(Output));
+        if ( TCCelsius < warmupTemp)
+        {
+          Output = 40; // reduce the power even more
+          analogWrite(SSR_pin, int(Output));
+        } else{
+          Output = 0;
+          analogWrite(SSR_pin, int(Output));
+        }
         tft.fillRoundRect(130, 80, 80, 20, RectRadius, BLACK);
         tft.setTextColor(WHITE);
         tft.drawString("regulate", 132, 80, 1);
       }
-
       
       // show the PWM output on the screen
       tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
       tft.setTextColor(WHITE);
       tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
 
-      elapsedHeatingTime += (SSRInterval / 5000.0); //SSRInterval is in ms, so it has to be divided by 1000
+      elapsedHeatingTime += (SSRInterval / 1000.0); //SSRInterval is in ms, so it has to be divided by 1000
 
       SSRTimer = millis();
     }
@@ -2585,3 +2562,5 @@ void controlSSR(double targetTemp, double currentTemp, unsigned long currentTime
     }
   }
 }
+
+// End of code
