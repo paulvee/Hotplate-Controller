@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.4.3"; 
+const String FW_VERSION = "V5.5.0"; 
 /*
   Changelog:
   Version V2.0.0:
@@ -110,15 +110,13 @@ const String FW_VERSION = "V5.4.3";
   Version 5.5.0
   After many tests, went back from using a PID regulation to a PWM-based mode. worked around the issues and tuned the modes.
   Changed the origin from the reflow graph to start at the estimated room temperature. Added mode status fields like in the 
-  reflow mode.
-
+  reflow mode. Tuned the reflow model. Added the cooling phase to the reflow model. Added a status field for the PWM value.
+  Refactored the source code to make it more readable, moved functions around and added more comments.
 
   
 
   Todo:
-
-  Test hardware heat-up times with additional heaters and see if we need to change 
-  the schematic or the code (two SSR's?, more K-type temp sensors?)
+  No open or desired issues at the moment.
 
   Nice to have:
   Maybe add a way to store an updated/edited profile in EEPROM and load that at boot.
