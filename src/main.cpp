@@ -90,9 +90,9 @@ const String FW_VERSION = "V5.4.3";
   Changed the drawActionButtons() code so it can handle a single line status message and set the text color and the background
   
   Version 5.4.0
-  Switched back to using an on/off control for the heaters. The PID method does not give any benefits and the PID controller 
-  is too slow and the overshoot especially at the end of the reflow phase is too large.
-  The on-off method is much better, but there is still a lot of overshoot after the reflow phase, with the temperature
+  Switched back to using an a PWM-based control for the heaters. The PID method does not give any benefits and the PID controller 
+  is too slow, the heater too powerfull and the overshoot especially at the end of the reflow phase is too large.
+  The PWM method is much better, but there is still a lot of overshoot after the reflow phase, with the temperature
   going up to 250°C and then dropping back to 200°C. This may not a problem for the solder paste I'm using, but it 
   might be.
 
@@ -100,11 +100,18 @@ const String FW_VERSION = "V5.4.3";
   Implemented some kind of early prediction for the preheat and reflow modes to stop the heating a bit earlier, 
   so the overshoot is less.
   Used a boost mode for the first 30 seconds of the reflow phase to get the temperature up faster, because the profile
-
-  Version 5.4.3
   starts at zero degrees, while the actual temperature is room temperature. Otherwise we already start behind the curve.
   Cleaned-up the old code and revisited or added to the comments and the code layout.
+
+  Version 5.4.3
   Repositioned the cooling temp and time fields to below the curve so with higher paste profiles they don't overlap.
+  Went back to try the PID mode, it should be perfect for the free heating and warm-up modes.
+
+  Version 5.5.0
+  After many tests, went back from using a PID regulation to a PWM-based mode. worked around the issues and tuned the modes.
+  Changed the origin from the reflow graph to start at the estimated room temperature. Added mode status fields like in the 
+  reflow mode.
+
 
   
 
@@ -2029,32 +2036,20 @@ void runReflow()
                     // print the target temperature on the display
                     printTargetTemperature();
                     
-                    // initially, the reflow curve starts at 0 degrees, while the actual temperature is
-                    // room temperature. To speed up the process, we can boost the temperature for the first
-                    // 40 seconds to speed up the process.
-                    if (elapsedHeatingTime < 40)
+                    // Do some kind of early turn-off to avoid temperature overshooting
+                    // if we are almost there and close to the targetTemp, we can stop heating
+                    // We start to see if we can stop heating a little while before we reach the end of the time,
+                    // and check to see if we are within a certain range of the target temperature.
+                    // we should be above the target temperature and not too far below it.
+                    // Note that the target temperature changes every cycle, so we have to check it every loop.
+                    if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-15) || (TCCelsius >= targetTemp)) 
                     {
-                        Output = 255; // maximum power
-                        analogWrite(SSR_pin, Output); // Full power
-                        tft.fillRoundRect(120, 60, 80, 16, RectRadius, RED);
-                        tft.setTextColor(WHITE);
-                        tft.drawString("BOOST", 122, 60, 2);
+                      Output = 0;
                     } else {
-
-                      // Do some kind of early turn-off to avoid temperature overshooting
-                      // if we are almost there and close to the targetTemp, we can stop heating
-                      // We start to see if we can stop heating a little while before we reach the end of the time,
-                      // and check to see if we are within a certain range of the target temperature.
-                      // we should be above the target temperature and not too far below it.
-                      // Note that the target temperature changes every cycle, so we have to check it every time.
-                      if ((elapsedHeatingTime >= preheatCutOff) && (TCCelsius >= targetTemp-10)||(TCCelsius >= targetTemp)) 
-                      {
-                        Output = 0;
-                      } else {
-                        Output = 255;
-                      } 
-                      analogWrite(SSR_pin, Output);
-                    }
+                      Output = 255;
+                    } 
+                    analogWrite(SSR_pin, Output);
+                    
                     // determine if we can switch to the next phase
                     if (TCCelsius > preheatTemp && elapsedHeatingTime > preheatTime)
                     {
@@ -2088,7 +2083,7 @@ void runReflow()
                     updateStatus(DGREEN, WHITE, "Reflow");
                     
                     // if we are almost there and above the targetTemp, we can stop heating to avoid overshooting
-                    if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-10)||(TCCelsius >= targetTemp)) 
+                    if ((elapsedHeatingTime >= reflowCutOff) && (TCCelsius >= targetTemp-15)||(TCCelsius >= targetTemp)) 
                     {
                       Output = 0;
                     } else {
@@ -2106,7 +2101,7 @@ void runReflow()
                 case HOLD:
                     // calculate the desired temperature from the reflow profile, based on the elapsed time and the temp from the profile
                     targetTemp = reflowTemp + ((elapsedHeatingTime - reflowTime) / (coolingTime - reflowTime)) * (coolingTemp - reflowTemp);
-                    //targetTemp = reflowTemp; // keep the temperature at the reflow temperature
+
                     printTargetTemperature();
                     updateStatus(DGREEN, WHITE, "Holding");
                     if (TCCelsius < targetTemp)
@@ -2117,16 +2112,16 @@ void runReflow()
                     }
                     analogWrite(SSR_pin, Output);
 
-                    //if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
+                    if (TCCelsius > coolingTemp && elapsedHeatingTime > coolingTime)
                     // when we have reached the coolingTime limit, we can move to the cooling phase
-                    if (elapsedHeatingTime > coolingTime)
+                    //if (elapsedHeatingTime > coolingTime)
                     {
                       currentPhase = COOLING;
                     }
                     break;
 
                 case COOLING:
-                    // turn of the heater, and turn on the fans and allow them to cool down to 40 degrees
+                    // turn of the heater, turn on the fans and allow them to cool down to 40 degrees
                     targetTemp = 40;
                     Output = 0;
                     analogWrite(SSR_pin, Output); // stop heating
@@ -2134,7 +2129,12 @@ void runReflow()
                     updateStatus(DGREEN, WHITE, "Cooling");
                     heatingEnabled = false; // Disable heating
                     coolingFanEnabled = true; // Enable cooling
-                    digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
+                    if (TCCelsius > targetTemp)
+                    {
+                      digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
+                    } else {
+                      digitalWrite(Fan_pin, LOW); // Turn on the fan(s)
+                    }
                     break;
                 }
                 // show the PWM output on the screen
@@ -2454,8 +2454,8 @@ void drawCurve()
   drawAxis();
 
   // Draw the curve
-  // starting in the origin of the x line, but at the room temperature (est. @22 degrees) of the y-line
-  tft.drawLine(xGraph, yGraph - (22 / tempPixelFactor), preheatTime_px, preheatTemp_px, YELLOW);
+  // starting in the origin of the x line, but at the room temperature (est. @20 degrees) of the y-line
+  tft.drawLine(xGraph, yGraph - (20 / tempPixelFactor), preheatTime_px, preheatTemp_px, YELLOW);
 	tft.drawLine(preheatTime_px, preheatTemp_px, soakingTime_px, soakingTemp_px, ORANGE);
 	tft.drawLine(soakingTime_px, soakingTemp_px, reflowTime_px, reflowTemp_px, RED);
 	tft.drawLine(reflowTime_px, reflowTemp_px, coolingTime_px, coolingTemp_px, RED);
