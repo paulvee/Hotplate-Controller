@@ -257,7 +257,9 @@ int TCRaw = 0; //raw value coming from the thermocouple module
 double TCCelsius = 0; //Celsius value of the temperature reading
 unsigned long temperatureTimer = 0; //Timer for measuring the temperature
 
+
 bool coolingFanEnabled = false; //status that tells the code if the fan is enabled or not
+String Fan = "OFF";
 bool heatingEnabled = false; //tells the code if the heating was enabled or not
 bool reflow = false; //tells if the reflow process has been enabled
 bool enableFreeHeating = false;
@@ -269,19 +271,6 @@ double elapsedHeatingTime = 0; //Time spent in the heating phase (unit is ms)
 double earlyStop; // slow down the heating process just before reaching targetTemp
 double Output; // holds the value for the PWM output to the SSR
 
-// -- PID controller
-/*
-// Define PID parameters
-double Setpoint, Input, Output;
-// p=proportional(gain), i=integral, d=derivative(deadband)
-double Kp = 40.0, Ki = 30.0, Kd = 1.0;
-double cons_Kp = 1.0, cons_Ki = 1.0, cons_Kd = 0.5; // conservative
-
-
-// Create the PID controller object
-// start with aggressive parameters
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT); // use error management
-*/
 
 // ==================================================================
 // Reflow Curve parts for Chipquick Sn42/Bi57.6/Ag0.4 - 138C : I have this paste in a syringe
@@ -2000,6 +1989,7 @@ To activate the simulation, uncomment the line:
 
 void runReflow()
 {
+
     if (reflow == true) // Only proceed if the reflow was enabled by the press of the start button.
     {
         if (elapsedHeatingTime < 340) // continue to run until the end of the time scale or when user stopped it
@@ -2132,16 +2122,25 @@ void runReflow()
                     if (TCCelsius > targetTemp)
                     {
                       digitalWrite(Fan_pin, HIGH); // Turn on the fan(s)
+                      Fan = "ON";
                     } else {
                       digitalWrite(Fan_pin, LOW); // Turn on the fan(s)
+                      Fan = "OFF";
                     }
                     break;
                 }
-                // show the PWM output on the screen
-                tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
-                tft.setTextColor(WHITE);
-                tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
-
+                if (heatingEnabled == true)
+                {
+                  // show the PWM output on the screen
+                  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+                  tft.setTextColor(WHITE);
+                  tft.drawString("PID : "+String(int(Output)), 122, 60, 2);
+                } else {
+                  // show the Fan status on the screen
+                  tft.fillRoundRect(120, 60, 80, 16, RectRadius, DGREEN); 
+                  tft.setTextColor(WHITE);
+                  tft.drawString("FAN : "+ Fan, 122, 60, 2);
+                }
                 // *** set interval to 100.0 (10x faster) when simulating
                 elapsedHeatingTime += (SSRInterval / 1000.0); // SSRInterval is in ms, so it has to be divided by 1000
                 SSRTimer = millis();
