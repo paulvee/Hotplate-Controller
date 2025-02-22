@@ -153,6 +153,7 @@ const String FW_VERSION = "V5.5.0";
 // #define TFT_DC    16  // TFT DC conn pin 6
 // #define TFT_RST   17  // TFT RES conn pin 7
 // #define TFT_MISO  19  // TFT not used
+#define TFT_ON 15  // TFT power and backlight control
 
 // function prototypes
 void setup();
@@ -177,7 +178,7 @@ void drawReflowCurve();
 void drawActionButtons();
 void measureTemperature();
 void removeFieldsFromDisplay();
-void updateStatus(uint16_t, uint16_t, char*);
+void updateStatus(int, int, const char*);
 void printTemp();
 void printTargetTemperature();
 void printElapsedTime();
@@ -487,8 +488,16 @@ void setup() {
     digitalWrite(Fan_pin, HIGH);  // Enable fan - turn them on as a test to see if they spin up
     //-----
     Serial.println("setting up tft");
-    tft.init();
-    tft.setRotation(1);  // Select the Landscape alignment - Use 3 to flip horizontally
+    pinMode(TFT_ON, OUTPUT);             // Define output pin for switching the power to the TFT
+    digitalWrite(TFT_ON, HIGH);          // Enable power to the TFT
+    vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1ms to initialize
+    // do we need to reset the TFT? It needs a low pulse of 10uS to initialize
+    // digitalWrite(TFT_RST, LOW);
+    // vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1mS to initialize (minimum is 10uS)
+    // digitalWrite(TFT_RST, HIGH);
+    tft.init();             // Initialize the display
+    tft.setRotation(1);     // Select the Landscape alignment - Use 3 to flip horizontally
+    tft.fillScreen(BLACK);  // Clear the screen and set it to black
     //-----
     thermoCouple.begin();
     thermoCouple.setSPIspeed(40000000);
@@ -517,10 +526,7 @@ void setup() {
 
     //-----
     Serial.println("show welcome screen on tft");
-
-    tft.fillScreen(BLACK);  // erase screen
     tft.setTextColor(WHITE);
-    tft.setRotation(1);  // Landscape alignment
 
     tft.setTextDatum(MC_DATUM);  // center text on display; works on current font only
     tft.drawString("Automated reflow station " + FW_VERSION, tft.width() / 2, 40, 2);
@@ -2290,7 +2296,7 @@ void removeFieldsFromDisplay() {
 }
 
 // show and update the status field on the display
-void updateStatus(uint16_t fieldColor, uint16_t textColor, const char* text) {
+void updateStatus(int fieldColor, int textColor, const char* text) {
     // Erase the previously printed text
     tft.fillRoundRect(160, 190, 70, 18, RectRadius, fieldColor);
     tft.setTextColor(textColor);
