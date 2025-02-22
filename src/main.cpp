@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.5.0";
+const String FW_VERSION = "V5.5.1";
 /*
   Changelog:
   Version V2.0.0:
@@ -113,6 +113,8 @@ const String FW_VERSION = "V5.5.0";
   reflow mode. Tuned the reflow model. Added the cooling phase to the reflow model. Added a status field for the PWM value.
   Refactored the source code to make it more readable, moved functions around and added more comments.
 
+  Version 5.5.1
+  Added powercontrol for the TFT. It eliminates the white screen during the booting period.
 
 
   Todo:
