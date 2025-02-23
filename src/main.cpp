@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.5.1";
+const String FW_VERSION = "V5.6.0";
 /*
   Changelog:
   Version V2.0.0:
@@ -116,6 +116,10 @@ const String FW_VERSION = "V5.5.1";
   Version 5.5.1
   Added powercontrol for the TFT. It eliminates the white screen during the booting period.
 
+  Version 5.6.0
+  Added an ISR for the rotary button now that I use hardware to produce a clean edge.
+  Added labels for the X-Y chart axis.
+
 
   Todo:
   No open or desired issues at the moment.
@@ -129,8 +133,8 @@ const String FW_VERSION = "V5.5.1";
 // #include <arduino.h> // Just in case I use some Arduino specific functionality
 #include <SPI.h>
 #include <TFT_eSPI.h>  // 2,4" SPI 240x320 - https://github.com/Ambercroft/TFT_eSPI/wiki
-#include <ezButton.h>  // for the rotary button press
-#include <math.h>      // for the round() function
+// #include <ezButton.h>  // for the rotary button press
+#include <math.h>  // for the round() function
 
 #include "MAX6675.h"
 // #include <PID_v1.h> // for the PID controller
@@ -160,6 +164,7 @@ const String FW_VERSION = "V5.5.1";
 // function prototypes
 void setup();
 void loop();
+void rotaryButtonISR();
 void rotaryEncoderISR();
 void processRotaryButton();
 void updateHighlighting();
@@ -259,7 +264,7 @@ const int xGraph = 18;         // the left side of the graph
 // Rotary encoder related
 int selectedItem = 1;  // item number for the active menu item
 static bool ButtonPressed = false;
-ezButton button(RotarySW);  // create an ezButton object
+volatile bool buttonPressedFlag = false;  // flag to tell the code that the button was pressed
 
 // Statuses of the DT and CLK pins on the encoder
 int CLKNow;
@@ -322,6 +327,8 @@ struct solderpaste {
 // Create an array of struct's for the various solder pastes.
 // The separator is the number of fields in the struct (9), so the array is created correctly.
 // it can hold any number of solderpastes, the code handles that.
+// https://www.chipquik.com/store/product_info.php?products_id=473036 for many different pastes and their profiles
+//
 solderpaste solderpastes[] = {
     // Paste 0
     "Sn42/Bi57.6/Ag0.4",  // Solderpaste
@@ -334,7 +341,18 @@ solderpaste solderpastes[] = {
     165,                  // coolingTemp
     250,                  // coolingTime start
 
-    // Paste 1
+    // paste 1
+    "Sn42/Bi57/Ag1",  // the same as the previous paste, but with a bit more silver
+    90,
+    90,
+    130,
+    180,
+    165,
+    240,
+    165,
+    250,
+
+    // Paste 2
     "Sn63/Pb37",
     100,
     30,
@@ -345,7 +363,7 @@ solderpaste solderpastes[] = {
     235,
     220,
 
-    // Paste 2
+    // Paste 3
     "Sn63/Pb37 Mod",
     100,
     60,  // changed this from an unrealistic 30s to 60s
@@ -474,10 +492,10 @@ void setup() {
     // PORT/PIN definitions
     pinMode(DSO_TRIG, OUTPUT);  // optional for tracing real-time events with a DSO
     // Rotary encoder-related
-    pinMode(RotaryCLK, INPUT);  // CLK
-    pinMode(RotaryDT, INPUT);   // DT
-    // the Rotary button is done by the library
-    button.setDebounceTime(20);                                                   // set debounce time for the rotary button to 20 milliseconds
+    pinMode(RotaryCLK, INPUT);                                                    // CLK - has pull-up resistor
+    pinMode(RotaryDT, INPUT);                                                     // DT - has pull-up resistor
+    pinMode(RotarySW, INPUT);                                                     // SW (Button function) has pull-up resistor
+    attachInterrupt(digitalPinToInterrupt(RotarySW), rotaryButtonISR, FALLING);   // Attach interrupt to the button pin                                                  // set debounce time for the rotary button to 20 milliseconds
     attachInterrupt(digitalPinToInterrupt(RotaryCLK), rotaryEncoderISR, CHANGE);  // CLK pin is inverted by a Schmitt-trigger gate
     // Reading the current status of the encoder for preparing it for the first movement/change
     CLKPrevious = digitalRead(RotaryCLK);
@@ -551,27 +569,47 @@ void setup() {
 
 /*
   The main loop of the code
-  Statemachines will activate the functionality of the code
+  Statemachines will activate the functionality of the code.
+  There are interrupts for the rotary encoder and the rotary button.
+  The code will measure the temperature and update the display.
+  The reflow, warmup, heating and cooling modes will execute when the user
+  selects them.
+  The code will also handle the selection of the solderpaste and the editing
+  of the reflow profile.
+
 */
 void loop() {
-    button.loop();  // MUST call the ezButton loop() function first
-
-    if (button.isPressed()) processRotaryButton();
     measureTemperature();
     updateHighlighting();
     runReflow();
     runWarmup();
     freeHeating();
     freeCooling();
+
+    if (buttonPressedFlag) {
+        processRotaryButton();
+        buttonPressedFlag = false;  // Reset the flag
+    }
+}
+
+/*
+  When the rotary button is pressed, we set a flag to signal the code that the button was pressed.
+  The flag is used in the main loop to process the button press.
+  The button press will either enter the edit mode for a reflow field to change the temperature or time,
+  or you can select another solderpaste or you activate one of the warm-up, reflow, heating, cooling modes.
+
+*/
+void IRAM_ATTR rotaryButtonISR() {
+    buttonPressedFlag = true;
 }
 
 /*
   Interrupt Service Routine for the Rotary Encoder
 
-  This is the routine that is used to move from field to field and when the button is clicked,
+  This is the routine that is used to move from field to field and when the button is pressed,
   it enters the edit mode in which the information in the field can be changed by rotation.
 
-  The interrupt was generated when a change on the RotaryCLK signal was detected.
+  The interrupt is generated when a change on the RotaryCLK signal is detected.
   The ISR takes a little time and we also have a hardware r/c delay, so by reading it again now,
   we should have a stable level.
 
@@ -582,9 +620,8 @@ void loop() {
   is very short, despite the many lines of code.
 
 */
-void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
-// we get here because the ISR detected a change on the CLK pin
-{
+void IRAM_ATTR rotaryEncoderISR() {  // IRAM_ATTR
+    // we get here because the ISR detected a change on the CLK pin
     // digitalWrite(DSO_TRIG, HIGH); // track duration, typically 1.5us
 
     CLKNow = digitalRead(RotaryCLK);  // Read the state of the CLK pin again
@@ -596,8 +633,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     preheatTemp = preheatTemp - 1;
                 }
             } else {
-                if (preheatTemp < 150)  // typical max value for preheat phase - feel free to change it
-                {
+                if (preheatTemp < 150) {  // typical max value for preheat phase - feel free to change it
                     preheatTemp = preheatTemp + 1;
                 }
             }
@@ -611,8 +647,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     preheatTime = preheatTime - 1;
                 }
             } else {
-                if (preheatTime < 90)  // Typical preheat time
-                {
+                if (preheatTime < 90) {  // Typical preheat time
                     preheatTime = preheatTime + 1;
                 }
             }
@@ -626,8 +661,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     soakingTemp = soakingTemp - 1;
                 }
             } else {
-                if (soakingTemp < 180)  // typical soaking temperature
-                {
+                if (soakingTemp < 180) {  // typical soaking temperature
                     soakingTemp = soakingTemp + 1;
                 }
             }
@@ -641,8 +675,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     soakingTime = soakingTime - 1;
                 }
             } else {
-                if (soakingTime < 180)  // typical (total) time at the end of the soaking period
-                {
+                if (soakingTime < 180) {  // typical (total) time at the end of the soaking period
                     soakingTime = soakingTime + 1;
                 }
             }
@@ -656,8 +689,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     reflowTemp = reflowTemp - 1;
                 }
             } else {
-                if (reflowTemp < 250)  // typical peak temp for reflow
-                {
+                if (reflowTemp < 250) {  // typical peak temp for reflow
                     reflowTemp = reflowTemp + 1;
                 }
             }
@@ -685,8 +717,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     coolingTemp = coolingTemp - 1;
                 }
             } else {
-                if (coolingTemp < 250)  // holding temperature before enterint the cooling phase
-                {
+                if (coolingTemp < 250) {  // holding temperature before enterint the cooling phase
                     coolingTemp = coolingTemp + 1;
                 }
             }
@@ -701,8 +732,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     coolingTime = coolingTime - 1;
                 }
             } else {
-                if (coolingTime < 250)  // total elapsed seconds before entering the cooling phase
-                {
+                if (coolingTime < 250) {  // total elapsed seconds before entering the cooling phase
                     coolingTime = coolingTime + 1;
                 }
             }
@@ -712,16 +742,11 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
     } else if (warmupTempSelected == true) {
         if (CLKNow != CLKPrevious && CLKNow == 1) {
             if (digitalRead(RotaryDT) != CLKNow) {
-                if (warmupTemp > 20)  // lowest at 20°C
-                {
-                    warmupTemp = warmupTemp - 1;
-                }
-                {
+                if (warmupTemp > 20) {  // lowest at 20°C
                     warmupTemp = warmupTemp - 1;
                 }
             } else {
-                if (warmupTemp < 60)  // Up to 60°C
-                {
+                if (warmupTemp < 60) {  // Up to 60°C
                     warmupTemp = warmupTemp + 1;
                 }
             }
@@ -737,8 +762,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     freeHeatingTemp = freeHeatingTemp - 1;
                 }
             } else {
-                if (freeHeatingTemp < 300)  // Here we allow a little higher temperature than the reflow curve temperature
-                {
+                if (freeHeatingTemp < 300) {  // Here we allow a little higher temperature than the reflow curve temperature
                     freeHeatingTemp = freeHeatingTemp + 1;
                 }
             }
@@ -754,8 +778,7 @@ void IRAM_ATTR rotaryEncoderISR()  // IRAM_ATTR
                     freeCoolingTemp = freeCoolingTemp - 1;
                 }
             } else {
-                if (freeCoolingTemp < 200)  // Here we allow a little higher temperature than the reflow curve temperature
-                {
+                if (freeCoolingTemp < 200) {  // Here we allow a little higher temperature than the reflow curve temperature
                     freeCoolingTemp = freeCoolingTemp + 1;
                 }
             }
@@ -839,7 +862,7 @@ void processRotaryButton() {
             if (preheatTempSelected == true) {
                 // Edit mode: Green background, red number
                 editMode = true;
-                tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 20, 9, RectRadius, GREEN);  // highlight
+                tft.fillRoundRect(preheatTime_px - 10, preheatTemp_px - 31, 24, 9, RectRadius, GREEN);  // highlight
                 tft.setTextColor(RED);
                 tft.drawString(String(preheatTemp), preheatTime_px - 10, preheatTemp_px - 30, 1);
 
@@ -1989,6 +2012,9 @@ void drawAxis() {
     tft.drawLine(13, (int)yGraph - (200 / tempPixelFactor), 22, (int)yGraph - (200 / tempPixelFactor), RED);  // 200C
     tft.drawLine(13, (int)yGraph - (250 / tempPixelFactor), 22, (int)yGraph - (250 / tempPixelFactor), RED);  // 250C
 
+    // Y-axis is Temperature in Celsius
+    tft.drawString("`c", 4, (int)tftY - 35, 2);
+
     // tick values
     tft.drawString("50", 5, (int)tftY - 17 - (50 / tempPixelFactor), 1);  // text, x, y color
     tft.drawString("100", 0, (int)tftY - 17 - (100 / tempPixelFactor), 1);
@@ -2011,6 +2037,9 @@ void drawAxis() {
     tft.drawLine(xGraph + (int)270 / timePixelFactor, 226, xGraph + (int)270 / timePixelFactor, 222, WHITE);  // 270S
     tft.drawLine(xGraph + (int)300 / timePixelFactor, 226, xGraph + (int)300 / timePixelFactor, 220, WHITE);  // 300S
     tft.drawLine(xGraph + (int)330 / timePixelFactor, 226, xGraph + (int)330 / timePixelFactor, 222, WHITE);  // 330S
+
+    // X-axis is Time in seconds
+    tft.drawString("seconds", 15, (int)tftY - 10, 1);
 
     // tick values with justified numbers
     tft.drawString("60", (xGraph + (int)60 / timePixelFactor) - 5, 230, 1);
