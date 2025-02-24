@@ -120,24 +120,27 @@ const String FW_VERSION = "V5.6.0";
   Added an ISR for the rotary button now that I use hardware to produce a clean edge.
   Added labels for the X-Y chart axis.
 
+  Version 5.6.1
+  Changed the MAX6675 library to the MAX31855 library.
+  I need the MAX6675 chip so I can solder it on the PCB, but want to use the reflow controller
+  to do that. The MAX31855 is a drop-in replacement for the MAX6675, but with a 14-bit resolution.
+
 
   Todo:
   No open or desired issues at the moment.
 
   Nice to have:
   Maybe add a way to store an updated/edited profile in EEPROM and load that at boot.
-  Add a beeper to signal end-of-reflow
+
 
 */
 
-// #include <arduino.h> // Just in case I use some Arduino specific functionality
+// Include the libraries we need
 #include <SPI.h>
 #include <TFT_eSPI.h>  // 2,4" SPI 240x320 - https://github.com/Ambercroft/TFT_eSPI/wiki
-// #include <ezButton.h>  // for the rotary button press
-#include <math.h>  // for the round() function
-
-#include "MAX6675.h"
-// #include <PID_v1.h> // for the PID controller
+#include <math.h>      // for the round() function
+// #include "MAX6675.h"  // can also use the 14-bit MAX31855K, but the 12-bit MAX6675 is cheaper and works fine
+#include "MAX31855.h"  // 14-bit version of the MAX6675
 
 #define DSO_TRIG 4  // optional: to trace real-time activity on a scope
 
@@ -193,7 +196,8 @@ void printPWM();
 void printFan();
 
 // setup the MAX library
-MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
+MAX31855 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
+// MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
 
 // Constructor for the TFT screen
 // using hardware SPI
@@ -835,21 +839,28 @@ void IRAM_ATTR rotaryEncoderISR() {  // IRAM_ATTR
   The rotary button has been pressed on a field so we enter the processing of the
   menu and values
 
-  Unfortunately, the way the code was written, with many tft activities,
-  you can't turn this into an ISR, so we have to poll the activity in the main loop
+  Unfortunately, the way the code was written with many tft activities,
+  you can't turn this function into an ISR, so we have to use a seperate ISR function
+  to watch the activity of the button, and then call this function. A flag is used in
+  the ISR so this function cannot be interrupted while we're executing it.
 
   The fields are selected by turning the rotary encoder itself in a loop.
   You can rotate both ways through the fields. Rotating the encoder will go through
   all the fields in the menu, and returns to the first element after the last one.
-  A press of the button enters the edit mode for the contend of the field it is on.
-  The selected field background it turned yellow.
-  When you enter the edit mode for the field, the background of the field changes
-  rom yellow to green. The rotary encoder turning is used to select a new value of the field.
+  A slected field turns yellow to indicate that it is selected.
 
-  Another press of the button ends the edit mode and the complete graph is redrawn based
-  on the new value.
-  The special fields are the solder paste selection, and the "buttons" for Warmup, Reflow, Heating and cooling.
-  Pressing a button activates the selected mode.  Pressing again stops the mode.
+  A press of the button enters the edit mode for the contend of the field it is on.
+  When you enter the edit mode for the field, the background of the field changes
+  from yellow to green to indicate the edit mode. The rotary encoder turning is used
+  to select a new value in the active field.
+
+  Another press of the button ends the edit mode, turns the field back to yellow and
+  if there was a change, the complete graph is redrawn based on the new value.
+
+  There are special fields for the solder paste selection, and the "buttons" for Warmup,
+  Reflow, Heating and cooling.
+  Pressing a button when one of these fields is selected activates the selected mode.
+  Pressing again stops the activity of the mode.
 
 */
 void processRotaryButton() {
@@ -2281,14 +2292,18 @@ void measureTemperature() {
     // Relevant YouTube video for this part: https://www.youtube.com/watch?v=PdS6-TccgK4
     if (millis() - temperatureTimer > 250)  // update frequency = 0.25s - faster than checking the heating (2s)
     {
-        int status = thermoCouple.read();
-        // do one read to make sure we get the valid temp reading
-        // if there is an issue, activate the code below
-        // if (status != 0) {
-        //   Serial.print("Max status: ");
-        //   Serial.print(status);
-        //   Serial.print("\t");
-        // }
+        int status = thermoCouple.read();  // Do one read to make sure we get the valid temp reading
+
+        /*
+          If there is an issue, activate the code below
+          to see the error code on the serial monitor
+
+        if (status != 0) {
+           Serial.print("Max status: ");
+           Serial.print(status);
+          Serial.print("\t");
+        }
+        */
 
         TCCelsius = thermoCouple.getTemperature();
 
@@ -2296,7 +2311,7 @@ void measureTemperature() {
         // Serial.println(TCCelsius); //print converted data on the serial terminal
 
         // Update the text on the TFT display whenever a reading is finished
-        void printTemp();
+        printTemp();
 
         temperatureTimer = millis();  // reset timer
     }
@@ -2341,7 +2356,7 @@ void printTemp() {
         tft.fillRoundRect(30, 40, 80, 16, RectRadius, RED);  // X,Y, W,H, Color
         tft.setTextColor(WHITE);
         tft.drawString("Temp ERROR", 32, 40, 2);
-        TCCelsius = 25;  // so the graph is on the TFT area
+        TCCelsius = 55;  // so the graph is on the TFT area
     } else {
         tft.fillRoundRect(30, 40, 80, 16, RectRadius, DGREEN);  // X,Y, W,H, Color
         tft.setTextColor(WHITE);
