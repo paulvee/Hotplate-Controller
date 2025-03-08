@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.6.0";
+const String FW_VERSION = "V5.6.2";  // Firmware version
 /*
   Changelog:
   Version V2.0.0:
@@ -124,6 +124,13 @@ const String FW_VERSION = "V5.6.0";
   Changed the MAX6675 library to the MAX31855 library.
   I need the MAX6675 chip so I can solder it on the PCB, but want to use the reflow controller
   to do that. The MAX31855 is a drop-in replacement for the MAX6675, but with a 14-bit resolution.
+  However, during the soldering I noticed quite a bit of noise on the temperature readings.
+  I don't think that the MAX31855 is a good replacement for the MAX6675, so I will go back to the MAX6675
+
+  Version 5.6.2
+  Now that the hardware is working, I changed the code to use the MAX6675 library again.
+  I also added code to keep the power to the TFT off, so we avoid the several seconds of a white screen
+  during the booting of the ESP32.
 
 
   Todo:
@@ -139,8 +146,9 @@ const String FW_VERSION = "V5.6.0";
 #include <SPI.h>
 #include <TFT_eSPI.h>  // 2,4" SPI 240x320 - https://github.com/Ambercroft/TFT_eSPI/wiki
 #include <math.h>      // for the round() function
-// #include "MAX6675.h"  // can also use the 14-bit MAX31855K, but the 12-bit MAX6675 is cheaper and works fine
-#include "MAX31855.h"  // 14-bit version of the MAX6675
+
+#include "MAX6675.h"  // can also use the 14-bit MAX31855K, but the 12-bit MAX6675 is cheaper and works fine
+// #include "MAX31855.h"  // 14-bit version of the MAX6675
 
 #define DSO_TRIG 4  // optional: to trace real-time activity on a scope
 
@@ -196,8 +204,8 @@ void printPWM();
 void printFan();
 
 // setup the MAX library
-MAX31855 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
-// MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
+// MAX31855 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
+MAX6675 thermoCouple(MAX_CS, MAX_SO, MAX_CLK);
 
 // Constructor for the TFT screen
 // using hardware SPI
@@ -479,6 +487,9 @@ int const reflowCutOffTime = 15;   // cut off the heater 15s before the target t
 //==================================================
 
 void setup() {
+    pinMode(TFT_ON, OUTPUT);    // Define output pin for switching the power to the TFT
+    digitalWrite(TFT_ON, LOW);  // Disable power to the TFT
+
     Serial.begin(9600);
     while (!Serial);
     delay(5000);
@@ -512,13 +523,8 @@ void setup() {
     digitalWrite(Fan_pin, HIGH);  // Enable fan - turn them on as a test to see if they spin up
     //-----
     Serial.println("setting up tft");
-    pinMode(TFT_ON, OUTPUT);             // Define output pin for switching the power to the TFT
-    digitalWrite(TFT_ON, HIGH);          // Enable power to the TFT
-    vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1ms to initialize
-    // do we need to reset the TFT? It needs a low pulse of 10uS to initialize
-    // digitalWrite(TFT_RST, LOW);
-    // vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1mS to initialize (minimum is 10uS)
-    // digitalWrite(TFT_RST, HIGH);
+    digitalWrite(TFT_ON, HIGH);  // Enable power for the TFT
+    // vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1ms to initialize
     tft.init();             // Initialize the display
     tft.setRotation(1);     // Select the Landscape alignment - Use 3 to flip horizontally
     tft.fillScreen(BLACK);  // Clear the screen and set it to black
