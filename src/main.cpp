@@ -117,7 +117,6 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
   Added powercontrol for the TFT. It eliminates the white screen during the booting period.
 
   Version 5.6.0
-  Added an ISR for the rotary button now that I use hardware to produce a clean edge.
   Added labels for the X-Y chart axis.
 
   Version 5.6.1
@@ -125,12 +124,13 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
   I need the MAX6675 chip so I can solder it on the PCB, but want to use the reflow controller
   to do that. The MAX31855 is a drop-in replacement for the MAX6675, but with a 14-bit resolution.
   However, during the soldering I noticed quite a bit of noise on the temperature readings.
-  I don't think that the MAX31855 is a good replacement for the MAX6675, so I will go back to the MAX6675
+  I don't think that the MAX31855 is a good replacement for the MAX6675.
 
   Version 5.6.2
   Now that the hardware is working, I changed the code to use the MAX6675 library again.
-  I also added code to keep the power to the TFT off, so we avoid the several seconds of a white screen
-  during the booting of the ESP32.
+  I also changed the setup code a bit to keep the power to the TFT off, so we avoid the several seconds
+  of a white screen during the booting of the ESP32.
+  Added a few minor tweaks here and there.
 
 
   Todo:
@@ -145,6 +145,7 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
 // Include the libraries we need
 #include <SPI.h>
 #include <TFT_eSPI.h>  // 2,4" SPI 240x320 - https://github.com/Ambercroft/TFT_eSPI/wiki
+#include <ezButton.h>  // for the rotary button press detection
 #include <math.h>      // for the round() function
 
 #include "MAX6675.h"  // can also use the 14-bit MAX31855K, but the 12-bit MAX6675 is cheaper and works fine
@@ -274,9 +275,8 @@ const int xGraph = 18;         // the left side of the graph
 #define ON 255  // for the analogWrite() PWM function
 
 // Rotary encoder related
-int selectedItem = 1;  // item number for the active menu item
-static bool ButtonPressed = false;
-volatile bool buttonPressedFlag = false;  // flag to tell the code that the button was pressed
+int selectedItem = 1;       // item number for the active menu item
+ezButton button(RotarySW);  // create an ezButton object
 
 // Statuses of the DT and CLK pins on the encoder
 int CLKNow;
@@ -488,7 +488,7 @@ int const reflowCutOffTime = 15;   // cut off the heater 15s before the target t
 
 void setup() {
     pinMode(TFT_ON, OUTPUT);    // Define output pin for switching the power to the TFT
-    digitalWrite(TFT_ON, LOW);  // Disable power to the TFT
+    digitalWrite(TFT_ON, LOW);  // Disable power to the TFT until we are ready to use it
 
     Serial.begin(9600);
     while (!Serial);
@@ -507,10 +507,10 @@ void setup() {
     // PORT/PIN definitions
     pinMode(DSO_TRIG, OUTPUT);  // optional for tracing real-time events with a DSO
     // Rotary encoder-related
-    pinMode(RotaryCLK, INPUT);                                                    // CLK - has pull-up resistor
-    pinMode(RotaryDT, INPUT);                                                     // DT - has pull-up resistor
-    pinMode(RotarySW, INPUT);                                                     // SW (Button function) has pull-up resistor
-    attachInterrupt(digitalPinToInterrupt(RotarySW), rotaryButtonISR, FALLING);   // Attach interrupt to the button pin                                                  // set debounce time for the rotary button to 20 milliseconds
+    pinMode(RotaryCLK, INPUT);  // CLK - has pull-up resistor
+    pinMode(RotaryDT, INPUT);
+    // the Rotary button is done by the library
+    button.setDebounceTime(20);                                                   // set debounce time for the rotary button to 20 milliseconds
     attachInterrupt(digitalPinToInterrupt(RotaryCLK), rotaryEncoderISR, CHANGE);  // CLK pin is inverted by a Schmitt-trigger gate
     // Reading the current status of the encoder for preparing it for the first movement/change
     CLKPrevious = digitalRead(RotaryCLK);
@@ -524,10 +524,9 @@ void setup() {
     //-----
     Serial.println("setting up tft");
     digitalWrite(TFT_ON, HIGH);  // Enable power for the TFT
-    // vTaskDelay(1 / portTICK_PERIOD_MS);  // give it 1ms to initialize
-    tft.init();             // Initialize the display
-    tft.setRotation(1);     // Select the Landscape alignment - Use 3 to flip horizontally
-    tft.fillScreen(BLACK);  // Clear the screen and set it to black
+    tft.init();                  // Initialize the display
+    tft.setRotation(1);          // Select the Landscape alignment - Use 3 to flip horizontally
+    tft.fillScreen(BLACK);       // Clear the screen and set it to black
     //-----
     thermoCouple.begin();
     thermoCouple.setSPIspeed(40000000);
@@ -565,7 +564,7 @@ void setup() {
     tft.drawString("www.curiousscientist.tech", tft.width() / 2, 120, 2);
     tft.setTextDatum(TL_DATUM);  // switch back to left formatted
 
-    vTaskDelay(500 / portTICK_PERIOD_MS);  // wait a little to show it
+    vTaskDelay(3000 / portTICK_PERIOD_MS);  // wait 3 seconds so you can read it
 
     Serial.println("writing reflow curve");
     // Erase the screen, then draw the starting graph
@@ -589,28 +588,15 @@ void setup() {
 
 */
 void loop() {
+    button.loop();  // must call the ezButton loop() function first
+
     measureTemperature();
     updateHighlighting();
     runReflow();
     runWarmup();
     freeHeating();
     freeCooling();
-
-    if (buttonPressedFlag) {
-        processRotaryButton();
-        buttonPressedFlag = false;  // Reset the flag
-    }
-}
-
-/*
-  When the rotary button is pressed, we set a flag to signal the code that the button was pressed.
-  The flag is used in the main loop to process the button press.
-  The button press will either enter the edit mode for a reflow field to change the temperature or time,
-  or you can select another solderpaste or you activate one of the warm-up, reflow, heating, cooling modes.
-
-*/
-void IRAM_ATTR rotaryButtonISR() {
-    buttonPressedFlag = true;
+    if (button.isPressed()) processRotaryButton();
 }
 
 /*
