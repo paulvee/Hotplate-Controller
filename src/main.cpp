@@ -131,6 +131,7 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
   I also changed the setup code a bit to keep the power to the TFT off, so we avoid the several seconds
   of a white screen during the booting of the ESP32.
   Added a few minor tweaks here and there.
+  Forgot to turn off the fan when we stop the free cooling mode.
 
 
   Todo:
@@ -158,7 +159,7 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
 #define RotarySW 33   // SW pin on the rotary encoder (Button function)
 
 #define SSR_pin 2   // Switching the heater ON/OFF; also the built-in LED so we can see when the SSR is on.
-#define Fan_pin 26  // GPIO pin for switching the fans ON/OFF (via a transistor)
+#define Fan_pin 26  // GPIO pin for switching the fans ON/OFF (via a MOSFET)
 
 #define MAX_CS 13  // CS pin for the MAX6675K
 #define MAX_SO 21  // MISO for MAX6675
@@ -525,7 +526,7 @@ void setup() {
     Serial.println("setting up tft");
     digitalWrite(TFT_ON, HIGH);  // Enable power for the TFT
     tft.init();                  // Initialize the display
-    tft.setRotation(1);          // Select the Landscape alignment - Use 3 to flip horizontally
+    tft.setRotation(3);          // Select the Landscape alignment - Use 3 to flip horizontally
     tft.fillScreen(BLACK);       // Clear the screen and set it to black
     //-----
     thermoCouple.begin();
@@ -1167,7 +1168,7 @@ void processRotaryButton() {
                 reflow = false;              // Reset reflow status flag to false (so free heating can run)
                 redrawCurve = true;          // simply redraw the whole graph
                 heatingEnabled = false;      // stop heating
-                digitalWrite(Fan_pin, OFF);  // turn the cooling fan off, the user can select the free cooling mode if desired
+                digitalWrite(Fan_pin, LOW);  // turn the cooling fan off, the user can select the free cooling mode if desired
                 // ending edit mode
                 editMode = false;
                 drawReflowCurve();               // redraw the curve with the values
@@ -1277,6 +1278,8 @@ void processRotaryButton() {
                 reflow = false;             // Reset reflow status flag to false (so free heating can run)
                 redrawCurve = true;         // simply redraw the whole graph
                 heatingEnabled = false;     // stop heating
+                digitalWrite(Fan_pin, LOW);  // Turn off the fan(s)
+                Fan = "OFF";                 // Update the status field
                 coolingFanEnabled = false;  // stop cooling fan.
                 drawReflowCurve();          // redraw the curve with the values
                 // Reapply the highlight to the selected field
