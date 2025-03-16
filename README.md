@@ -13,6 +13,9 @@ The heating elements are controlled by an SSR, and there is a 12V DC output to c
 The complete description is on my Blog that can be found here: 
 https://www.paulvdiyblogs.net/2025/02/creating-hotplate-reflow-station.html
 
+The project is also documented on gthe site of my sponsor, PCBWay, where PCB's can be ordered directly:
+https://www.pcbway.com/project/shareproject/Modifying_a_Hotplate_to_a_Reflow_Solder_Station_4dc6241c.html
+
 WARNING:
 You will be dealing with live mains voltages, high currents and high temperatures.
 Be extra careful, and if you are not qualified, ask someboday that is qualified to help you.
