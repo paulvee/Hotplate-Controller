@@ -11,7 +11,7 @@
 // Adopting the code for a commercial hotplate UYUE 946C 400W 200x200mm
 
 //
-const String FW_VERSION = "V5.6.2";  // Firmware version
+const String FW_VERSION = "V5.6.3";  // Firmware version
 /*
   Changelog:
   Version V2.0.0:
@@ -133,6 +133,9 @@ const String FW_VERSION = "V5.6.2";  // Firmware version
   Added a few minor tweaks here and there.
   Forgot to turn off the fan when we stop the free cooling mode.
 
+  Version 5.6.3
+  Changed the error condition for the K-Type thermocouple to always display a value, even when it is
+  obviously incorrect. If a suspicious condition is detected, the terminal will display the Max chip status.
 
   Todo:
   No open or desired issues at the moment.
@@ -1275,13 +1278,13 @@ void processRotaryButton() {
                 heatingEnabled = false;  // stop heating if still on
                 //---------------------------
                 // Put back all the values after stop
-                reflow = false;             // Reset reflow status flag to false (so free heating can run)
-                redrawCurve = true;         // simply redraw the whole graph
-                heatingEnabled = false;     // stop heating
+                reflow = false;              // Reset reflow status flag to false (so free heating can run)
+                redrawCurve = true;          // simply redraw the whole graph
+                heatingEnabled = false;      // stop heating
                 digitalWrite(Fan_pin, LOW);  // Turn off the fan(s)
                 Fan = "OFF";                 // Update the status field
-                coolingFanEnabled = false;  // stop cooling fan.
-                drawReflowCurve();          // redraw the curve with the values
+                coolingFanEnabled = false;   // stop cooling fan.
+                drawReflowCurve();           // redraw the curve with the values
                 // Reapply the highlight to the selected field
                 updateStatus(BLACK, BLACK, "");  // erase the status field
                 menuChanged = true;              // Ensure menuChanged is set to true
@@ -2290,20 +2293,23 @@ void measureTemperature() {
         int status = thermoCouple.read();  // Do one read to make sure we get the valid temp reading
 
         /*
-          If there is an issue, activate the code below
-          to see the error code on the serial monitor
-
-        if (status != 0) {
-           Serial.print("Max status: ");
-           Serial.print(status);
-          Serial.print("\t");
-        }
+          If there is an issue, we'll show the status on the serial monitor.
+          The errors can be:
+            0 for status OK
+            4 for Thermocouple short to VCC
+            128 no read done yet
+            129 no cummunication
         */
+        if (status != 0) {
+            Serial.print("Max status: ");
+            Serial.print(status);
+            Serial.print("\t");
+        }
 
         TCCelsius = thermoCouple.getTemperature();
 
-        // Serial.print("Temp: ");
-        // Serial.println(TCCelsius); //print converted data on the serial terminal
+        Serial.print("Temp: ");
+        Serial.println(TCCelsius);  // print converted data on the serial terminal
 
         // Update the text on the TFT display whenever a reading is finished
         printTemp();
@@ -2346,14 +2352,17 @@ void updateStatus(int fieldColor, int textColor, const char* text) {
 
 // show and update the actual temperature to the TFT
 void printTemp() {
-    if (TCCelsius > 500)  // is incorrect value, could be a grounding issue?
-    {
-        tft.fillRoundRect(30, 40, 80, 16, RectRadius, RED);  // X,Y, W,H, Color
+    if (TCCelsius > 500) {
+        // >500 must be an incorrect value, could be a grounding issue?
+        // if the "temperature" is 1024 "degrees", there is a short circuit to VCC
+        // or the thermocouple is not connected properly. The error code will be 4
+        tft.fillRoundRect(30, 40, 90, 16, RectRadius, RED);  // X,Y, W,H, Color
         tft.setTextColor(WHITE);
-        tft.drawString("Temp ERROR", 32, 40, 2);
-        TCCelsius = 55;  // so the graph is on the TFT area
+        // this is an error code not a temperature
+        tft.drawString("Temp " + String(int(TCCelsius)), 32, 40, 2);
+
     } else {
-        tft.fillRoundRect(30, 40, 80, 16, RectRadius, DGREEN);  // X,Y, W,H, Color
+        tft.fillRoundRect(30, 40, 90, 16, RectRadius, DGREEN);  // X,Y, W,H, Color
         tft.setTextColor(WHITE);
         // can only print "°C" with font 2
         tft.drawString("Temp " + String(int(TCCelsius)) + "`C", 32, 40, 2);
