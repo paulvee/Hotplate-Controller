@@ -3,7 +3,7 @@ This is a project to modify a UYUE 946C model hotplate and convert it to a reflo
 The UYUE 946C hotplate is modified by replacing the original controller and by adding an additional heating element.
 The new controller is ESP32-based and has a TFT color display.
 The selection of an ESP32 is because it will allow a much more responsive display than an Arduino can accomplish.
-Note that I'm using a smaller version with 38-pins and a pin distance of 25mm. See the blog for more information.
+Note that I'm using the ESP-32 DEVKIT V1 from DOIT, which is a smaller version with 30-pins and a pin distance of 25mm. See the blog for more information.
 
 Hardware SPI is used to communicate with the TFT display and the K-Type temperature sensor.
 The software allows you to select different solder pastes, and it will set the reflow profile dynamically.
