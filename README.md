@@ -1,5 +1,8 @@
 This is a project to modify a UYUE 946C model hotplate and convert it to a reflow soldering station.
 
+WARNING: The code that I wrote only works with Visual Studio Code (VSC), and NOT with the Arduino IDE. 
+The reason for this discrepancy is the difference in libraries for the display and the way you need to address the SPI bus ports. There have been a few makers that built the hotplate, but ran into issues with the display. It stayed blank. They used the Arduino IDE.
+
 The UYUE 946C hotplate is modified by replacing the original controller and by adding an additional heating element.
 The new controller is ESP32-based and has a TFT color display.
 The selection of an ESP32 is because it will allow a much more responsive display than an Arduino can accomplish.
